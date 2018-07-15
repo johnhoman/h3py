@@ -20,7 +20,6 @@ PyAPI_DATA(PyTypeObject) PyGeoCoord_Type;
 
 typedef struct {
     PyObject_HEAD
-    double lat;
     GeoCoord *ob_gval;
 } PyGeoCoordObject;
 
