@@ -1,5 +1,5 @@
 install:
-	  python setup.py build && python setup.py install
+	  rm -rf build && python setup.py install
 
 test:
 	  python -m unittest discover

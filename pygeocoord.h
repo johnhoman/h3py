@@ -21,11 +21,7 @@ typedef struct {
 } PyGeoCoordObject;
 
 static PyObject *
-to_h3(PyGeoCoordObject *self, PyObject *args);
-
-/* static member function */
-static PyObject *
-from_h3(PyObject *self, PyObject *args);
+PyGeoCoord_to_h3(PyGeoCoordObject *self, PyObject *args);
 
 static PyObject *
 PyGeoCoord_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
@@ -47,11 +43,6 @@ PyGeoCoord_getlon(PyGeoCoordObject *self, void *closure);
 
 static int
 PyGeoCoord_setlon(PyGeoCoordObject *self, PyObject *value, void *closer);
-
-extern PyTypeObject PyGeoCoord_Type;
-
-
-
 
 
 #ifdef __cplusplus
