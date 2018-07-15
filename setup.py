@@ -6,8 +6,10 @@ import os
 UBER_H3 = ('h3')
 
 
-h3py_ext = Extension('h3py', sources=['h3py.c', 'pygeocoord.c'],
+h3py_ext = Extension('h3py',
+                      sources=['src/h3py.c', 'src/pygeocoord.c'],
                       include_dirs=[
+                          'include',
                           join(UBER_H3, 'src', 'h3lib', 'include')
                       ],
                       library_dirs=[join(UBER_H3, 'lib')],
