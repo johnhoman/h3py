@@ -77,7 +77,7 @@ PyGeoCoord_init(PyGeoCoordObject *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
-    // TODO: checkout lat, lon
+    // TODO: checkout lat, lon for units. Should be radians
     // if (lat > 90 || lat < -90 || lon > 180 || lon < -180) {
     //     PyErr_SetString(PyExc_ValueError,
     //         "Values out of range. Must be in range {-180, 180}");
@@ -166,6 +166,25 @@ PyGeoCoord_repr(PyGeoCoordObject *self)
                                 PyFloat_FromDouble(PyGeoCoord_Lon(self)));
 }
 
+static PyObject *
+PyGeoCoord_from_degrees(PyObject *self, PyObject *args)
+{
+    double lat, lon;
+
+    if (!PyArg_ParseTuple(args, "dd", &lat, &lon)) {
+        PyErr_SetString(PyExc_ValueError,
+            "Cannot parse arguments 'lat', 'lon'");
+        return NULL;
+    }
+
+    lat = H3_EXPORT(degsToRads)(lat);
+    lon = H3_EXPORT(degsToRads)(lon);
+
+    PyObject *arglist = Py_BuildValue("(dd)", lat, lon);
+    return PyObject_CallObject((PyObject *)&PyGeoCoord_Type, arglist);
+
+}
+
 static PyGetSetDef PyGeoCoord_getseters[] = {
     {"lat", (getter)PyGeoCoord_getlat, (setter)PyGeoCoord_setlat,
      "GeoCoord.latitude", NULL},
@@ -179,7 +198,18 @@ static PyMemberDef PyGeoCoord_members[] = {
 };
 
 static PyMethodDef PyGeoCoord_methods[] = {
-     {"to_h3", (PyCFunction)PyGeoCoord_to_h3, METH_VARARGS, ""},
+     {
+         "to_h3",
+         (PyCFunction)PyGeoCoord_to_h3,
+         METH_VARARGS,
+         "find the H3Index cooresponding to GeoCoord.lat, GeoCoord.lon"
+     },
+     {
+         "from_degrees",
+         (PyCFunction)PyGeoCoord_from_degrees,
+         METH_VARARGS | METH_STATIC,
+         "return a GeoCoord object with input arguments lat/lon in units of degrees."
+     },
      {NULL}
 };
 

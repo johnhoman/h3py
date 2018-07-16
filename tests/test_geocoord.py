@@ -28,27 +28,20 @@ def test_to_h3():
         assert exists(test_path), "Missing test files"
 
     target = join(test_path, 'rand*centers.txt')
-    log = open('output.log', 'w+')
 
     def assert_expected(h1: H3Index, g1: GeoCoord):
         assert isinstance(h1, H3Index)
         assert isinstance(g1, GeoCoord)
+
         h2 = g1.to_h3(h1.get_resolution())
-        print('h2 string', h2.to_string())
-        print('h1 string', h1.to_string())
         assert h1 == h2, "got unexpected GeoCoord.to_h3 output"
 
     for filename in glob(target):
         with open(filename, 'rt') as test_file:
             test_values = [line.split() for line in test_file]
         for h3_str, lat_degrees, lon_degrees in test_values:
-            print('h3 str', h3_str)
             h3 = H3Index.from_string(h3_str)
-            print('degrees', lat_degrees, lon_degrees)
-            lat = radians(float(lat_degrees))
-            lon = radians(float(lon_degrees))
-            coord = GeoCoord(lat, lon)
-            print('radians', lat, lon)
+            lat = float(lat_degrees)
+            lon = float(lon_degrees)
+            coord = GeoCoord.from_degrees(lat, lon)
             assert_expected(h3, coord)
-
-    log.close()
