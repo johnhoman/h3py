@@ -22,7 +22,22 @@ typedef struct {
 } PyH3IndexObject;
 
 static PyObject *
-PyH3Index_to_geocoord(PyH3IndexObject *self, PyObject *args);
+PyH3Index_get_resolution(PyH3IndexObject *self);
+
+static PyObject *
+PyH3Index_get_base_cell(PyH3IndexObject *self);
+
+static PyObject *
+PyH3Index_from_string(PyObject *ob, PyObject *args);
+
+static PyObject *
+PyH3Index_to_string(PyH3IndexObject *self, PyObject *args);
+
+static PyObject *
+PyH3Index_is_valid(PyH3IndexObject *self);
+
+static PyObject *
+PyH3Index_to_geocoord(PyH3IndexObject *self);
 
 static PyObject *
 PyH3Index_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
@@ -36,10 +51,8 @@ PyH3Index_dealloc(PyH3IndexObject *self);
 static PyObject *
 PyH3Index_getindex(PyH3IndexObject *self, void *closure);
 
-static PyObject *
+static int
 PyH3Index_setindex(PyH3IndexObject *self, PyObject *value, void *closure);
-
-
 
 
 

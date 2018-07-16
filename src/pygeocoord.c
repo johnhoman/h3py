@@ -6,23 +6,32 @@
 
 
 #include "pygeocoord.h"
+#include "pyh3index.h"
 
 static PyObject *
 PyGeoCoord_to_h3(PyGeoCoordObject *self, PyObject *args)
 {
     GeoCoord *ob_gval;
     H3Index index;
-    int res;
+    int res = -1;
+    PyObject *arglist;
 
     if (!PyArg_ParseTuple(args, "i", &res)) {
         // TODO: handle error case
         return NULL;
     }
 
+    if (res < 0) {
+        PyErr_SetString(PyExc_ValueError,
+            "Error parsing input argument 'res'.");
+        return NULL;
+    }
+
     ob_gval = self->ob_gval;
     index = H3_EXPORT(geoToH3)(ob_gval, res);
+    arglist = Py_BuildValue("(O)", PyLong_FromLongLong(index));
 
-    return PyLong_FromLong((long)index);
+    return PyObject_CallObject((PyObject *)&PyH3Index_Type, arglist);
 }
 
 
@@ -61,16 +70,19 @@ PyGeoCoord_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 static int
 PyGeoCoord_init(PyGeoCoordObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"lat", "lon", NULL};
+    static char *kwlist[] = {"lat", "lon",  NULL};
     double lat, lon;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "dd", kwlist, &lat, &lon)) {
+    PyObject *units;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "dd|O", kwlist, &lat, &lon, &units)) {
         return -1;
     }
 
     // TODO: checkout lat, lon
-    if (lat > 180 || lon > 180) {
-
-    }
+    // if (lat > 90 || lat < -90 || lon > 180 || lon < -180) {
+    //     PyErr_SetString(PyExc_ValueError,
+    //         "Values out of range. Must be in range {-180, 180}");
+    //     return -1;
+    // }
 
     PyGeoCoord_Lat(self) = lat;
     PyGeoCoord_Lon(self) = lon;
@@ -146,6 +158,14 @@ PyGeoCoord_setlon(PyGeoCoordObject *self, PyObject *value, void *closure)
     return -1;
 }
 
+static PyObject *
+PyGeoCoord_repr(PyGeoCoordObject *self)
+{
+    return PyUnicode_FromFormat("GeoCoord: {lat: %R, lon: %R}",
+                                PyFloat_FromDouble(PyGeoCoord_Lat(self)),
+                                PyFloat_FromDouble(PyGeoCoord_Lon(self)));
+}
+
 static PyGetSetDef PyGeoCoord_getseters[] = {
     {"lat", (getter)PyGeoCoord_getlat, (setter)PyGeoCoord_setlat,
      "GeoCoord.latitude", NULL},
@@ -173,7 +193,7 @@ PyTypeObject PyGeoCoord_Type = {
      0,                                          /* tp_getattr */
      0,                                          /* tp_setattr */
      0,                                          /* tp_reserved */
-     0,                                          /* tp_repr */
+     (reprfunc)PyGeoCoord_repr,                  /* tp_repr */
      0,                                          /* tp_as_number */
      0,                                          /* tp_as_sequence */
      0,                                          /* tp_as_mapping */
