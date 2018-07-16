@@ -5,42 +5,33 @@
 #include <stdio.h>
 
 
-#ifndef Py_H3_H
-#define Py_H3_H
-#ifdef __cpluscplus
-extern "C" {
-#endif
+#include "pygeocoord.h"
+#include "pyh3index.h"
 
-
-PyAPI_DATA(PyTypeObject) PyGeoCoord_Type;
-
-#define PyGeoCoord_Check(x) (Py_TYPE(x) == &PyGeoCoord_Type)
-#define PyGeoCoord_Lat(x) (x)->ob_gval->lat
-#define PyGeoCoord_Lon(x) (x)->ob_gval->lon
-
-typedef struct {
-    PyObject_HEAD
-    double lat;
-    GeoCoord *ob_gval;
-} PyGeoCoordObject;
-
-/* forward declaration */
 static PyObject *
-geo_to_h3(PyGeoCoordObject *self, PyObject *args)
+PyGeoCoord_to_h3(PyGeoCoordObject *self, PyObject *args)
 {
     GeoCoord *ob_gval;
     H3Index index;
-    int res;
+    int res = -1;
+    PyObject *arglist;
 
     if (!PyArg_ParseTuple(args, "i", &res)) {
         // TODO: handle error case
         return NULL;
     }
 
+    if (res < 0) {
+        PyErr_SetString(PyExc_ValueError,
+            "Error parsing input argument 'res'.");
+        return NULL;
+    }
+
     ob_gval = self->ob_gval;
     index = H3_EXPORT(geoToH3)(ob_gval, res);
+    arglist = Py_BuildValue("(O)", PyLong_FromLongLong(index));
 
-    return PyLong_FromLong((long)index);
+    return PyObject_CallObject((PyObject *)&PyH3Index_Type, arglist);
 }
 
 
@@ -79,16 +70,22 @@ PyGeoCoord_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 static int
 PyGeoCoord_init(PyGeoCoordObject *self, PyObject *args, PyObject *kwds)
 {
-    static char *kwlist[] = {"lat", "lon", NULL};
+    static char *kwlist[] = {"lat", "lon",  NULL};
     double lat, lon;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "dd", kwlist, &lat, &lon)) {
+    PyObject *units;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "dd|O", kwlist, &lat, &lon, &units)) {
         return -1;
     }
 
+    // TODO: checkout lat, lon for units. Should be radians
+    // if (lat > 90 || lat < -90 || lon > 180 || lon < -180) {
+    //     PyErr_SetString(PyExc_ValueError,
+    //         "Values out of range. Must be in range {-180, 180}");
+    //     return -1;
+    // }
+
     PyGeoCoord_Lat(self) = lat;
     PyGeoCoord_Lon(self) = lon;
-    // PyGeoCoord_Lat(self) = lat;
-    // PyGeoCoord_Lon(self) = lon;
     return 0;
 }
 
@@ -161,22 +158,58 @@ PyGeoCoord_setlon(PyGeoCoordObject *self, PyObject *value, void *closure)
     return -1;
 }
 
+static PyObject *
+PyGeoCoord_repr(PyGeoCoordObject *self)
+{
+    return PyUnicode_FromFormat("GeoCoord: {lat: %R, lon: %R}",
+                                PyFloat_FromDouble(PyGeoCoord_Lat(self)),
+                                PyFloat_FromDouble(PyGeoCoord_Lon(self)));
+}
+
+static PyObject *
+PyGeoCoord_from_degrees(PyObject *self, PyObject *args)
+{
+    double lat, lon;
+
+    if (!PyArg_ParseTuple(args, "dd", &lat, &lon)) {
+        PyErr_SetString(PyExc_ValueError,
+            "Cannot parse arguments 'lat', 'lon'");
+        return NULL;
+    }
+
+    lat = H3_EXPORT(degsToRads)(lat);
+    lon = H3_EXPORT(degsToRads)(lon);
+
+    PyObject *arglist = Py_BuildValue("(dd)", lat, lon);
+    return PyObject_CallObject((PyObject *)&PyGeoCoord_Type, arglist);
+
+}
 
 static PyGetSetDef PyGeoCoord_getseters[] = {
-     {"lat", (getter)PyGeoCoord_getlat, (setter)PyGeoCoord_setlat,
-      "GeoCoord.latitude", NULL},
-     {"lon", (getter)PyGeoCoord_getlon, (setter)PyGeoCoord_setlon,
-      "GeoCoord.longitude", NULL},
-     {NULL}
+    {"lat", (getter)PyGeoCoord_getlat, (setter)PyGeoCoord_setlat,
+     "GeoCoord.latitude", NULL},
+    {"lon", (getter)PyGeoCoord_getlon, (setter)PyGeoCoord_setlon,
+     "GeoCoord.longitude", NULL},
+    {NULL}
 };
-
 
 static PyMemberDef PyGeoCoord_members[] = {
      {NULL}
 };
 
 static PyMethodDef PyGeoCoord_methods[] = {
-     {"geo_to_h3", (PyCFunction)geo_to_h3, METH_VARARGS, ""},
+     {
+         "to_h3",
+         (PyCFunction)PyGeoCoord_to_h3,
+         METH_VARARGS,
+         "find the H3Index cooresponding to GeoCoord.lat, GeoCoord.lon"
+     },
+     {
+         "from_degrees",
+         (PyCFunction)PyGeoCoord_from_degrees,
+         METH_VARARGS | METH_STATIC,
+         "return a GeoCoord object with input arguments lat/lon in units of degrees."
+     },
      {NULL}
 };
 
@@ -190,7 +223,7 @@ PyTypeObject PyGeoCoord_Type = {
      0,                                          /* tp_getattr */
      0,                                          /* tp_setattr */
      0,                                          /* tp_reserved */
-     0,                                          /* tp_repr */
+     (reprfunc)PyGeoCoord_repr,                  /* tp_repr */
      0,                                          /* tp_as_number */
      0,                                          /* tp_as_sequence */
      0,                                          /* tp_as_mapping */
@@ -220,47 +253,3 @@ PyTypeObject PyGeoCoord_Type = {
      0,                                          /* tp_alloc */
      PyGeoCoord_new,                             /* tp_new */
 };
-
-
-static PyObject *
-h3_get_resolution(PyObject *self, PyObject *args)
-{
-
-}
-
-static PyObject *
-string_to_h3(PyObject *self, PyObject *args)
-{
-
-}
-
-
-static struct PyModuleDef moduledef = {
-     PyModuleDef_HEAD_INIT,
-     "h3py",
-     NULL,
-     -1,
-     NULL
-};
-
-PyMODINIT_FUNC
-PyInit_h3py(void)
-{
-    PyObject *module = PyModule_Create(&moduledef);
-
-    if (PyType_Ready(&PyGeoCoord_Type) < 0){
-        return NULL;
-    }
-
-    Py_INCREF(&PyGeoCoord_Type);
-    if(PyModule_AddObject(module, "GeoCoord", (PyObject *)&PyGeoCoord_Type)){
-        return NULL;
-    }
-    return module;
-}
-
-#ifdef __cpluscplus
-}
-#endif
-
-#endif /* H3 def */
