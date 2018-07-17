@@ -30,7 +30,7 @@ static void
 PyGeoBoundary_dealloc(PyGeoBoundaryObject *self);
 
 static PyObject *
-PyGeoBoundary_getverts(PyGeoBoundaryObject *self, void *closure);
+PyGeoBoundary_getverts(PyGeoBoundaryObject *self);
 
 static PyObject *
 PyGeoBoundary_repr(PyGeoBoundaryObject *self);

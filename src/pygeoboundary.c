@@ -64,12 +64,13 @@ PyGeoBoundary_init(PyGeoBoundaryObject *self, PyObject *args, PyObject *kwds)
     GeoCoord *ob_val;
     Py_ssize_t index;
     for (index = 0; index < (Py_ssize_t)num_verts; ++index) {
-        elem = PyList_GetItem(verts, 0);
+        elem = PyList_GetItem(verts, index);
         if (!PyGeoCoord_Check(elem)) {
             PyErr_SetString(PyExc_TypeError,
                 "GeoBoundary verts must be of type 'h3py.GeoCoord'.");
             return -1;
-        } else {
+        }
+        else {
             py_elem = (PyGeoCoordObject *)elem;
             ob_val = (GeoCoord *)py_elem->ob_gval;
         }
@@ -87,7 +88,7 @@ PyGeoBoundary_dealloc(PyGeoBoundaryObject *self)
 }
 
 static PyObject *
-PyGeoBoundary_getverts(PyGeoBoundaryObject *self, void *closure)
+PyGeoBoundary_getverts(PyGeoBoundaryObject *self)
 {
     PyObject *ob_verts;
     GeoBoundary *ob_val;
@@ -125,12 +126,10 @@ PyGeoBoundary_getverts(PyGeoBoundaryObject *self, void *closure)
 static PyObject *
 PyGeoBoundary_repr(PyGeoBoundaryObject *self)
 {
-    return PyObject_Repr(PyGeoBoundary_getverts(self, NULL));
+    return PyObject_Repr(PyGeoBoundary_getverts(self));
 }
 
 static PyGetSetDef PyGeoBoundary_getseters[] = {
-    {"verts", (getter)PyGeoBoundary_getverts, 0,
-     "GeoBoundary vertices", NULL},
     {NULL}
 };
 
@@ -139,6 +138,8 @@ static PyMemberDef PyGeoBoundary_members[] = {
 };
 
 static PyMethodDef PyGeoBoundary_methods[] = {
+     {"verts", (PyCFunction)PyGeoBoundary_getverts, METH_NOARGS,
+               "Returns list of GeoCoord objects"},
      {NULL}
 };
 
