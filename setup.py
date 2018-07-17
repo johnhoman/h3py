@@ -10,7 +10,8 @@ h3py_ext = Extension('h3py',
                       sources=[
                           'src/h3py.c',
                           'src/pygeocoord.c',
-                          'src/pyh3index.c'
+                          'src/pyh3index.c',
+                          'src/pygeoboundary.c'
                       ],
                       include_dirs=[
                           'include',
