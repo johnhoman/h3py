@@ -34,10 +34,9 @@ PyH3Index_get_base_cell(PyH3IndexObject *self)
 static PyObject *
 PyH3Index_from_string(PyObject *unused, PyObject *args)
 {
-    PyObject *u_str;
-    const char *str;
+    PyObject *u_str, *arglist;
     H3Index h3;
-    PyObject *arglist;
+    const char *str;
 
     if(!PyArg_ParseTuple(args, "O", &u_str)) {
         PyErr_SetString(PyExc_ValueError,
