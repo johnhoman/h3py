@@ -13,6 +13,12 @@ extern "C" {
 
 PyAPI_DATA(PyTypeObject) PyGeoBoundary_Type;
 #define PyGeoBoundary_Check(x) (Py_TYPE(x) == &PyGeoBoundary_Type)
+#define PyGeoBoundary_GetVert(ob, i) ((ob)->ob_val->verts[(i)])
+#define PyGeoBoundary_GetVerts(ob) ((ob)->ob_val->verts)
+#define PyGeoBoundary_GetGeoBoundary(x) ((x)->ob_val)
+#define PyGeoBoundary_GetNumberVerts(x) ((x)->ob_val->numVerts)
+#define PyGeoBoundary_AsPyObject(x) ((PyObject *)x)
+#define PyGeoBoundary_Allocate(T) ((PyGeoBoundaryObject *)(T)->tp_alloc((T), 0))
 
 /* wrapping the original object seems stupid  */
 typedef struct {

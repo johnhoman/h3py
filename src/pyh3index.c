@@ -84,7 +84,7 @@ PyH3Index_is_valid(PyH3IndexObject *self)
     return PyBool_FromLong((long)is_valid);
 }
 
-static PyObject *
+PyObject *
 PyH3Index_to_geocoord(PyH3IndexObject *self)
 {
     PyGeoCoordObject *coord;

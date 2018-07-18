@@ -2,7 +2,6 @@
 #include <pygeoboundary.h>
 #include <pygeocoord.h>
 
-
 static PyObject *
 PyGeoBoundary_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
@@ -14,9 +13,8 @@ PyGeoBoundary_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    self = (PyGeoBoundaryObject *)type->tp_alloc(type, 0);
-
-    ob_val = (GeoBoundary *)PyMem_RawMalloc(sizeof(GeoBoundary));
+    self = PyGeoBoundary_Allocate(type);
+    ob_val = PyMem_RawMalloc(sizeof(GeoBoundary));
 
     if (ob_val == NULL) {
         PyErr_SetString(PyExc_MemoryError,
@@ -24,9 +22,9 @@ PyGeoBoundary_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         return NULL;
     }
     ob_val->numVerts = 0;
-    self->ob_val = ob_val;
+    PyGeoBoundary_GetGeoBoundary(self) = ob_val;
 
-    return (PyObject *)self;
+    return PyGeoBoundary_AsPyObject(self);
 }
 
 static int
@@ -74,9 +72,9 @@ PyGeoBoundary_init(PyGeoBoundaryObject *self, PyObject *args, PyObject *kwds)
             py_elem = (PyGeoCoordObject *)elem;
             ob_val = (GeoCoord *)py_elem->ob_gval;
         }
-        self->ob_val->verts[index] = *ob_val;
+        PyGeoBoundary_GetVert(self, index) = *ob_val;
     }
-    self->ob_val->numVerts = num_verts;
+    PyGeoBoundary_GetNumberVerts(self) = num_verts;
     return 0;
 }
 
@@ -94,7 +92,7 @@ PyGeoBoundary_getverts(PyGeoBoundaryObject *self)
     GeoBoundary *ob_val;
     int n_verts;
 
-    ob_val = self->ob_val;
+    ob_val = PyGeoBoundary_GetGeoBoundary(self);
     n_verts = ob_val->numVerts;
     ob_verts = PyList_New((Py_ssize_t)n_verts);
 

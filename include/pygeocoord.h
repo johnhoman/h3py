@@ -14,13 +14,14 @@ PyAPI_DATA(PyTypeObject) PyGeoCoord_Type;
 #define PyGeoCoord_Check(x) (Py_TYPE(x) == &PyGeoCoord_Type)
 #define PyGeoCoord_Lat(x) (x)->ob_gval->lat
 #define PyGeoCoord_Lon(x) (x)->ob_gval->lon
+#define PyGeoCoord_AsGeoCoord(ob) ((ob)->ob_gval)
 
 typedef struct {
     PyObject_HEAD
     GeoCoord *ob_gval;
 } PyGeoCoordObject;
 
-static PyObject *
+PyObject *
 PyGeoCoord_to_h3(PyGeoCoordObject *self, PyObject *args);
 
 static PyObject *

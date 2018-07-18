@@ -14,7 +14,7 @@ extern "C" {
 
 PyAPI_DATA(PyTypeObject) PyH3Index_Type;
 #define PyH3Index_Check(x) (Py_TYPE(x) == &PyH3Index_Type)
-
+#define PyH3Index_AsLongLong(ob) (PyLong_FromLongLong((ob)->ob_val))
 
 typedef struct {
     PyObject_HEAD
@@ -36,7 +36,7 @@ PyH3Index_to_string(PyH3IndexObject *self, PyObject *args);
 static PyObject *
 PyH3Index_is_valid(PyH3IndexObject *self);
 
-static PyObject *
+PyObject *
 PyH3Index_to_geocoord(PyH3IndexObject *self);
 
 static PyObject *

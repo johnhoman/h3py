@@ -8,7 +8,7 @@
 #include "pygeocoord.h"
 #include "pyh3index.h"
 
-static PyObject *
+PyObject *
 PyGeoCoord_to_h3(PyGeoCoordObject *self, PyObject *args)
 {
     GeoCoord *ob_gval;
