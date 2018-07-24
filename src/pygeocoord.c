@@ -161,9 +161,30 @@ PyGeoCoord_setlon(PyGeoCoordObject *self, PyObject *value, void *closure)
 static PyObject *
 PyGeoCoord_repr(PyGeoCoordObject *self)
 {
-    return PyUnicode_FromFormat("GeoCoord: {lat: %R, lon: %R}",
-                                PyFloat_FromDouble(PyGeoCoord_Lat(self)),
-                                PyFloat_FromDouble(PyGeoCoord_Lon(self)));
+    PyObject *ob_mems, *pprint, *pformat, *repr;
+
+    ob_mems = PyDict_New();
+    PyDict_SetItemString(ob_mems, "lat", PyFloat_FromDouble(PyGeoCoord_Lat(self)));
+    PyDict_SetItemString(ob_mems, "lon", PyFloat_FromDouble(PyGeoCoord_Lon(self)));
+
+    pprint = PyImport_ImportModuleNoBlock("pprint");
+    Py_INCREF(pprint);
+    pformat = PyObject_GetAttrString(pprint, "pformat");
+    Py_INCREF(pformat);
+
+    if (!PyCallable_Check(pformat)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+
+    repr = PyObject_Call(pformat, Py_BuildValue("(O)", ob_mems), NULL);
+
+    PyDict_Clear(ob_mems);
+    Py_DECREF(ob_mems);
+    Py_DECREF(pformat);
+    Py_DECREF(pprint);
+    return repr;
+
 }
 
 static PyObject *

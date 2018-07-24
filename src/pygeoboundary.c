@@ -1,6 +1,16 @@
 #include <Python.h>
 #include <pygeoboundary.h>
 #include <pygeocoord.h>
+#include <h3api.h>
+#include <constants.h>
+#include <geoCoord.h>
+
+
+PyGeoBoundaryObject *
+PyGeoBoundary_New(void)
+{
+    return (PyGeoBoundaryObject *)PyGeoBoundary_new(&PyGeoBoundary_Type, NULL, NULL);
+}
 
 static PyObject *
 PyGeoBoundary_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
@@ -124,7 +134,82 @@ PyGeoBoundary_getverts(PyGeoBoundaryObject *self)
 static PyObject *
 PyGeoBoundary_repr(PyGeoBoundaryObject *self)
 {
-    return PyObject_Repr(PyGeoBoundary_getverts(self));
+    PyObject *pprint, *pformat, *repr, *verts, *coord;
+    pprint = PyImport_ImportModuleNoBlock("pprint");
+    Py_INCREF(pprint);
+    pformat = PyObject_GetAttrString(pprint, "pformat");
+    Py_INCREF(pprint);
+    if (!PyCallable_Check(pformat)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+
+    verts = PyGeoBoundary_getverts(self);
+    repr = PyObject_Call(pformat, Py_BuildValue("(O)", verts), NULL);
+    Py_ssize_t i;
+    for (i = 0; i < PyList_Size(verts); ++i) {
+        coord = PyList_GetItem(verts, i);
+        Py_DECREF(coord);
+    }
+    Py_DECREF(verts);
+    Py_DECREF(pprint);
+    Py_DECREF(pformat);
+    return repr;
+}
+
+static PyObject *
+PyGeoBoundary___eq__(PyObject *self, PyObject *other)
+{
+    PyObject *result;
+    GeoBoundary *bound_self, *bound_other;
+
+    if (!PyGeoBoundary_Check(self) || !PyGeoBoundary_Check(other)) {
+        result = Py_False;
+    }
+    bound_self = PyGeoBoundary_AS_GeoBoundary((PyGeoBoundaryObject *)self);
+    bound_other = PyGeoBoundary_AS_GeoBoundary((PyGeoBoundaryObject *)other);
+
+    result = Py_True;
+    if (bound_self->numVerts != bound_other->numVerts) {
+        result = Py_False;
+    }
+
+    int i;
+    GeoCoord geo_self, geo_other;
+    for (i = 0; i < bound_self->numVerts; ++i) {
+        geo_self = bound_self->verts[i];
+        geo_other = bound_other->verts[i];
+        if (!geoAlmostEqual(&geo_self, &geo_other)) {
+            result = Py_False;
+        }
+    }
+
+    Py_INCREF(result);
+    return result;
+
+}
+
+static PyObject *
+PyGeoBoundary_richcompare(PyObject *self, PyObject *other, int op)
+{
+
+  PyObject *result;
+  switch (op) {
+    case Py_EQ:
+        result =  PyGeoBoundary___eq__(self, other) ? Py_True: Py_False;
+        break;
+    case Py_NE:
+        result =  PyGeoBoundary___eq__(self, other) ? Py_False: Py_True;
+        break;
+    case Py_GT:
+    case Py_GE:
+    case Py_LT:
+    case Py_LE:
+        result = Py_False;
+        break;
+  }
+  Py_XINCREF(result);
+  return result;
 }
 
 static PyGetSetDef PyGeoBoundary_getseters[] = {
@@ -165,7 +250,7 @@ PyTypeObject PyGeoBoundary_Type = {
      "GeoObject object",                         /* tp_doc */
      0,                                          /* tp_traverse */
      0,                                          /* tp_clear */
-     0,                                          /* tp_richcompare */
+     PyGeoBoundary_richcompare,                  /* tp_richcompare */
      0,                                          /* tp_weaklistoffset */
      0,                                          /* tp_iter */
      0,                                          /* tp_iternext */

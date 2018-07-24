@@ -12,6 +12,8 @@ extern "C" {
 #endif
 
 PyAPI_DATA(PyTypeObject) PyGeoBoundary_Type;
+
+// TODO: Capitolize tail end of macro names
 #define PyGeoBoundary_Check(x) (Py_TYPE(x) == &PyGeoBoundary_Type)
 #define PyGeoBoundary_GetVert(ob, i) ((ob)->ob_val->verts[(i)])
 #define PyGeoBoundary_GetVerts(ob) ((ob)->ob_val->verts)
@@ -19,12 +21,18 @@ PyAPI_DATA(PyTypeObject) PyGeoBoundary_Type;
 #define PyGeoBoundary_GetNumberVerts(x) ((x)->ob_val->numVerts)
 #define PyGeoBoundary_AsPyObject(x) ((PyObject *)x)
 #define PyGeoBoundary_Allocate(T) ((PyGeoBoundaryObject *)(T)->tp_alloc((T), 0))
+#define PyGeoBoundary_AS_GeoBoundary(ob) ((ob)->ob_val)
+
 
 /* wrapping the original object seems stupid  */
 typedef struct {
     PyObject_HEAD
     GeoBoundary *ob_val;
 } PyGeoBoundaryObject;
+
+/* public constructor wrapper */
+PyGeoBoundaryObject *
+PyGeoBoundary_New(void);
 
 static PyObject *
 PyGeoBoundary_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
@@ -40,6 +48,9 @@ PyGeoBoundary_getverts(PyGeoBoundaryObject *self);
 
 static PyObject *
 PyGeoBoundary_repr(PyGeoBoundaryObject *self);
+
+static PyObject *
+PyGeoBoundary_richcompare(PyObject *self, PyObject *other, int op);
 
 #ifdef __cplusplus
 }

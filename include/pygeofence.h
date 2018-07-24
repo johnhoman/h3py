@@ -24,3 +24,6 @@ PyGeofence_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
 
 static int
 PyGeofence_init(PyGeofenceObject *self, PyObject *args, PyObject *kwds);
+
+static PyObject *
+PyGeofence_append(PyGeofenceObject *self, PyObject *args);

@@ -1,4 +1,4 @@
-from h3py import H3Index, GeoCoord
+from h3py import H3Index, GeoCoord, geoToH3
 import numpy as np
 import pytest
 from glob import glob
@@ -32,7 +32,6 @@ def test_to_h3():
     def assert_expected(h1: H3Index, g1: GeoCoord):
         assert isinstance(h1, H3Index)
         assert isinstance(g1, GeoCoord)
-
         h2 = g1.to_h3(h1.get_resolution())
         assert h1 == h2, "got unexpected GeoCoord.to_h3 output"
 

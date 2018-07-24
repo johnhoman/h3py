@@ -8,6 +8,8 @@
 
 #include <pyh3index.h>
 #include <pygeocoord.h>
+#include <pygeoboundary.h>
+
 
 static PyObject *
 PyH3Index_get_resolution(PyH3IndexObject *self)
@@ -30,6 +32,25 @@ PyH3Index_get_base_cell(PyH3IndexObject *self)
     base_cell = H3_EXPORT(h3GetBaseCell)(h3);
     return PyLong_FromLong((long)base_cell);
 }
+
+static PyObject *
+PyH3Index_to_boundary(PyH3IndexObject *self)
+{
+    H3Index h3;
+    GeoBoundary *gp;
+    PyGeoBoundaryObject *boundary;
+
+    boundary = PyGeoBoundary_New();
+    assert(boundary != NULL);
+
+    /* TODO: NULL check */
+    gp = PyGeoBoundary_AS_GeoBoundary(boundary);
+    h3 = PyH3Index_AS_H3Index(self);
+    H3_EXPORT(h3ToGeoBoundary)(h3, gp);
+
+    return (PyObject *)boundary;
+}
+
 
 static PyObject *
 PyH3Index_from_string(PyObject *unused, PyObject *args)
@@ -88,9 +109,9 @@ PyObject *
 PyH3Index_to_geocoord(PyH3IndexObject *self)
 {
     PyGeoCoordObject *coord;
+    PyObject *arglist;
     GeoCoord *g;
     H3Index h3;
-    PyObject *arglist;
 
 
     arglist = Py_BuildValue("dd", 0.0, 0.0);
@@ -274,6 +295,8 @@ static PyMethodDef PyH3Index_methods[] = {
     {"from_string", (PyCFunction)PyH3Index_from_string,
     METH_VARARGS | METH_STATIC, ""},
     {"to_string", (PyCFunction)PyH3Index_to_string,
+    METH_VARARGS, ""},
+    {"to_boundary", (PyCFunction)PyH3Index_to_boundary,
     METH_VARARGS, ""},
     {"to_coord", (PyCFunction)PyH3Index_to_geocoord,
     METH_NOARGS, "find the lat/lon center point g of the cell h3."},

@@ -14,7 +14,7 @@ PyAPI_DATA(PyTypeObject) PyGeoCoord_Type;
 #define PyGeoCoord_Check(x) (Py_TYPE(x) == &PyGeoCoord_Type)
 #define PyGeoCoord_Lat(x) (x)->ob_gval->lat
 #define PyGeoCoord_Lon(x) (x)->ob_gval->lon
-#define PyGeoCoord_AsGeoCoord(ob) ((ob)->ob_gval)
+#define PyGeoCoord_AsGeoCoord(ob) (((PyGeoCoordObject *)(ob))->ob_gval)
 
 typedef struct {
     PyObject_HEAD

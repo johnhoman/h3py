@@ -10,6 +10,69 @@
 #include <pygeoboundary.h>
 
 
+static H3Index *
+_init_h3indexset(H3Index *in, size_t size)
+{
+    size_t i;
+    for (i = 0; i < size; ++i) {
+        in[i] = 0;
+    }
+    return in;
+}
+
+
+static PyObject *
+_PyList_FromH3IndexSet(H3Index *h3in, size_t size)
+{
+    PyObject *h3out;
+    PyH3IndexObject *h3;
+    h3out = PyList_New((Py_ssize_t)size);
+    size_t i;
+    for (i = 0; i < size; ++i) {
+        if (h3in[i] == 0) {
+            Py_INCREF(Py_None);
+            PyList_SET_ITEM(h3out, (Py_ssize_t)i, Py_None);
+        } else {
+            h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
+            PyH3Index_AS_H3Index(h3) = h3in[i];
+            PyList_SET_ITEM(h3out, (Py_ssize_t)i, (PyObject *)h3);
+        }
+    }
+    return h3out;
+}
+
+static int
+_validate_h3_list_input(PyObject *h3set)
+{
+    PyObject *ob;
+
+    if (PyList_Check(h3set)) {
+        Py_ssize_t i;
+        for (i = 0; i < PyList_Size(h3set); ++i) {
+            ob = PyList_GetItem(h3set, i);
+            if (!PyH3Index_Check(ob)) {
+                return -1;
+            }
+        }
+    } else {
+        return -1;
+    }
+
+    return 0;
+}
+
+static void
+_h3index_fromlist(H3Index *h3setin, PyObject *h3set)
+{
+    PyH3IndexObject *h3;
+    Py_ssize_t i;
+    for (i = 0; i < PyList_Size(h3set); ++i) {
+        h3 = (PyH3IndexObject *)PyList_GetItem(h3set, i);
+        h3setin[i] = PyH3Index_AS_H3Index(h3);
+    }
+}
+
+
 static PyObject *
 _geoToH3(PyObject *self, PyObject *args){
 
@@ -31,20 +94,19 @@ _geoToH3(PyObject *self, PyObject *args){
     return PyGeoCoord_to_h3(g, Py_BuildValue("(O)", res));
 }
 
+
 static PyObject *
 _h3ToGeo(PyObject *self, PyObject *args){
-    
+
     PyH3IndexObject *h3;
 
     if (!PyArg_ParseTuple(args, "O", &h3)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Cound not parse args for function 'h3py.h3ToGeo'.");
+        PyErr_SetString(PyExc_RuntimeError, "h3py.h3ToGeo");
         return NULL;
     }
 
     if (!PyH3Index_Check(h3)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Could not parse args for function 'h3py.geoToH3'.");
+        PyErr_SetString(PyExc_RuntimeError, "h3py.h3ToGeo");
         return NULL;
     }
 
@@ -53,38 +115,217 @@ _h3ToGeo(PyObject *self, PyObject *args){
 
 static PyObject *
 _h3ToGeoBoundary(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
+    PyH3IndexObject *pyh3;
+    PyGeoBoundaryObject *pygp;
+    GeoBoundary *gp;
+    H3Index h3;
+
+    if (!PyArg_ParseTuple(args, "O!", &PyH3Index_Type ,&pyh3)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Could not parse args for function 'h3ToGeoBoundary'.");
+        return NULL;
+    }
+    Py_INCREF(pyh3);
+
+    h3 = PyH3Index_AS_H3Index(pyh3);
+    pygp = PyGeoBoundary_New();
+    if (pygp == NULL) {
+        PyErr_SetString(PyExc_SystemError,
+            "Could not allocate GeoBoundary object.");
+        Py_DECREF(pyh3);
+        return NULL;
+    }
+
+    gp = PyGeoBoundary_AS_GeoBoundary(pygp);
+    H3_EXPORT(h3ToGeoBoundary)(h3, gp);
+
+    Py_DECREF(pyh3);
+    return (PyObject *)pygp;
 }
 
 static PyObject *
-_maxKringSize(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
+_maxKringSize(PyObject *self, PyObject *args)
+{
+    int k, size;
+
+    if (!PyArg_ParseTuple(args, "i", &k)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Could not parse arguments for function 'maxKringSize'.");
+        return NULL;
+    }
+
+    size = H3_EXPORT(maxKringSize)(k);
+    return PyLong_FromLong((long)size);
 }
+
 
 static PyObject *
 _hexRange(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
+    int sz_alloc = 0, k = 0, err = 0;
+    PyH3IndexObject *origin;
+
+    if (!PyArg_ParseTuple(args, "O!i", &PyH3Index_Type, &origin, &k)) {
+        PyH3_PARSE_ERROR("hexRange");
+        return NULL;
+    }
+    Py_INCREF(origin);
+    sz_alloc = H3_EXPORT(maxKringSize)(k);
+
+    H3Index out[sz_alloc];
+    int i;
+    for (i = 0; i < sz_alloc; ++i) {
+        out[i] = 0;
+    }
+    err = H3_EXPORT(hexRange)(PyH3Index_AS_H3Index(origin), k, out);
+    if (err != 0) {
+        PyErr_Format(PyExc_RuntimeError,
+            "Unknown error occured getting hex range for index '%llu'",
+            PyH3Index_AS_H3Index(origin));
+    }
+
+    PyObject *range;
+    PyH3IndexObject *h3;
+    range = PyList_New(sz_alloc);
+
+    for (i = 0; i < sz_alloc; ++i) {
+        if (out[i] == 0) {
+            Py_INCREF(Py_None);
+            PyList_SET_ITEM(range, (Py_ssize_t)i, Py_None);
+        } else {
+            h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
+            if (h3 == NULL) {
+                PyErr_SetString(PyExc_MemoryError,
+                    "Could not allocate memory for 'h3py.H3Index'.");
+                return NULL;
+            }
+            PyH3Index_AS_H3Index(h3) = out[i];
+            PyList_SET_ITEM(range, (Py_ssize_t)i, (PyObject *)h3);
+        }
+    }
+
+    Py_DECREF(origin);
+    return range;
 }
+
 
 static PyObject *
 _hexRangeDistances(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
+    int sz_alloc = 0, k = 0, sz_out = 0;
+    PyH3IndexObject *origin;
+
+    if (!PyArg_ParseTuple(args, "O!i", &PyH3Index_Type, &origin, &k)) {
+        PyH3_PARSE_ERROR("hexRangeDistances");
+        return NULL;
+    }
+    Py_INCREF(origin);
+    sz_alloc = H3_EXPORT(maxKringSize)(k);
+
+    H3Index out[sz_alloc];
+    int distances[sz_alloc];
+
+    H3Index h3_origin = PyH3Index_AS_H3Index(origin);
+    sz_out = H3_EXPORT(hexRangeDistances)(h3_origin, k, out, distances);
+
+    PyObject *range, *dists, *distance;
+    PyH3IndexObject *h3;
+
+    range = PyList_New(sz_out);
+    dists = PyList_New(sz_out);
+
+    if (range == NULL || dists == NULL) {
+        PyErr_SetString(PyExc_MemoryError,
+            "Could not allocated memory for return values.");
+        return NULL;
+    }
+
+    size_t ii;
+    for (ii = 0; ii < (size_t)sz_out; ++ii) {
+        h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
+        if (h3 == NULL) {
+            PyErr_SetString(PyExc_MemoryError,
+                "Could not allocate H3Index.");
+            return NULL;
+        }
+        PyH3Index_AS_H3Index(h3) = out[ii];
+        PyList_SET_ITEM(range, (Py_ssize_t)ii, (PyObject *)h3);
+
+        distance = PyLong_FromLong(distances[ii]);
+        if (distance == NULL) {
+            PyErr_SetString(PyExc_MemoryError,
+                "Could not allocated memory for 'int'.");
+            return NULL;
+        }
+        PyList_SET_ITEM(dists, (Py_ssize_t)ii, distance);
+    }
+
+    Py_DECREF(origin);
+    return Py_BuildValue("(OO)", range, dists);
 }
 
 static PyObject *
 _hexRanges(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
+    PyObject *h3set;
+    int length = 0, k = 0, sz_alloc = 0, err = 0;
+
+    if (!PyArg_ParseTuple(args, "Oi", &h3set, &k)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Error parse arguments for function 'h3py.hexRanges'.");
+        return NULL;
+    }
+
+    Py_INCREF(h3set);
+    if (_validate_h3_list_input(h3set) < 0) {
+        PyErr_SetString(PyExc_TypeError,
+            "Positional argument number 1 must be type 'list' "
+            "and contain only type 'h3py.H3Index'.");
+        return NULL;
+    }
+
+    length = (int)PyList_Size(h3set);
+    sz_alloc = length * H3_EXPORT(maxKringSize)(k);
+    H3Index h3setin[length];
+    _h3index_fromlist(h3setin, h3set);
+
+    /* initialize output array  */
+    H3Index out[sz_alloc];
+    assert(_init_h3indexset(out, sz_alloc) == out);
+
+    err = H3_EXPORT(hexRanges)(h3setin, length, k, out);
+    if (err != 0) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Unknown error occured. Cannot get hex ranges.");
+    }
+
+    Py_DECREF(h3set);
+    return _PyList_FromH3IndexSet(out, sz_alloc);
 }
 
 static PyObject *
 _kRing(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
+    PyObject *origin;
+    int k = 0, size = 0;
+
+    if (!PyArg_ParseTuple(args, "Oi", &origin, &k)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Could not parse args for function 'h3py.kRing'.");
+        return NULL;
+    }
+
+    if (!PyH3Index_Check(origin)) {
+        PyErr_SetString(PyExc_TypeError,
+            "Positional argument 1 must be of type 'h3py.H3Index'.");
+        return NULL;
+    }
+    Py_INCREF(origin);
+    size = H3_EXPORT(maxKringSize)(k);
+
+    H3Index out[size];
+    _init_h3indexset(out, size);
+
+    H3_EXPORT(kRing)(PyH3Index_AS_H3Index((PyH3IndexObject *)origin), k, out);
+
+    Py_DECREF(origin);
+    return _PyList_FromH3IndexSet(out, size);
 }
 
 static PyObject *
