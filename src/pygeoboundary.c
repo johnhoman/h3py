@@ -193,7 +193,7 @@ static PyObject *
 PyGeoBoundary_richcompare(PyObject *self, PyObject *other, int op)
 {
 
-  PyObject *result;
+  PyObject *result = Py_False;
   switch (op) {
     case Py_EQ:
         result =  PyGeoBoundary___eq__(self, other) ? Py_True: Py_False;

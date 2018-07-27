@@ -284,6 +284,8 @@ PyH3Index_setindex(PyH3IndexObject *self, PyObject *value, void *closure)
 }
 
 static PyMemberDef PyH3Index_members[] = {
+    {"value", T_ULONGLONG, offsetof(PyH3IndexObject, ob_val), READONLY,
+     "integer representation of H3Index object"},
     {NULL}
 };
 
