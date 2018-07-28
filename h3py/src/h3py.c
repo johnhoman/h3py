@@ -13,6 +13,7 @@
 static H3Index *
 _init_h3indexset(H3Index *in, size_t size)
 {
+    /* Assign invalid h3 indices to h3 index vector `in` */
     size_t i;
     for (i = 0; i < size; ++i) {
         in[i] = 0;
@@ -24,19 +25,26 @@ _init_h3indexset(H3Index *in, size_t size)
 static PyObject *
 _PyList_FromH3IndexSet(H3Index *h3in, size_t size)
 {
-    PyObject *h3out;
+    /* Create a python list from an H3Index vector h3in. */
+    PyObject *h3out, *e;
     PyH3IndexObject *h3;
-    h3out = PyList_New((Py_ssize_t)size);
-    size_t i;
-    for (i = 0; i < size; ++i) {
+    Py_ssize_t listsize ,i;
+
+    listsize = (Py_ssize_t)size;
+
+
+    h3out = PyList_New(listsize);
+    for (i = 0; i < listsize; ++i) {
         if (h3in[i] == 0) {
+            /* if the h3 index is invalid, put None in it's place */
             Py_INCREF(Py_None);
-            PyList_SET_ITEM(h3out, (Py_ssize_t)i, Py_None);
+            e  = Py_None;
         } else {
             h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
             PyH3Index_AS_H3Index(h3) = h3in[i];
-            PyList_SET_ITEM(h3out, (Py_ssize_t)i, (PyObject *)h3);
+            e = (PyObject *)h3;
         }
+        PyList_SET_ITEM(h3out, i, e);
     }
     return h3out;
 }
@@ -44,9 +52,10 @@ _PyList_FromH3IndexSet(H3Index *h3in, size_t size)
 static int
 _validate_h3_list_input(PyObject *h3set)
 {
-    PyObject *ob;
-
-    if (PyList_Check(h3set)) {
+    if (!PyList_Check(h3set)) {
+        return -1;
+    else {
+        PyObject *ob;
         Py_ssize_t i;
         for (i = 0; i < PyList_Size(h3set); ++i) {
             ob = PyList_GetItem(h3set, i);
@@ -54,8 +63,6 @@ _validate_h3_list_input(PyObject *h3set)
                 return -1;
             }
         }
-    } else {
-        return -1;
     }
 
     return 0;
