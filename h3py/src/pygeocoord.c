@@ -159,13 +159,21 @@ PyGeoCoord_setlon(PyGeoCoordObject *self, PyObject *value, void *closure)
 }
 
 static PyObject *
+PyGeoCoord_asdict(PyGeoCoordObject *self)
+{
+    PyObject *dict;
+
+    dict = PyDict_New();
+    PyDict_SetItemString(dict, "lat", PyFloat_FromDouble(PyGeoCoord_Lat(self)));
+    PyDict_SetItemString(dict, "lon", PyFloat_FromDouble(PyGeoCoord_Lon(self)));
+
+    return dict;
+}
+
+static PyObject *
 PyGeoCoord_repr(PyGeoCoordObject *self)
 {
     PyObject *ob_mems, *pprint, *pformat, *repr;
-
-    ob_mems = PyDict_New();
-    PyDict_SetItemString(ob_mems, "lat", PyFloat_FromDouble(PyGeoCoord_Lat(self)));
-    PyDict_SetItemString(ob_mems, "lon", PyFloat_FromDouble(PyGeoCoord_Lon(self)));
 
     pprint = PyImport_ImportModuleNoBlock("pprint");
     Py_INCREF(pprint);
@@ -177,6 +185,8 @@ PyGeoCoord_repr(PyGeoCoordObject *self)
         return NULL;
     }
 
+
+    ob_mems = PyGeoCoord_asdict(self);
     repr = PyObject_Call(pformat, Py_BuildValue("(O)", ob_mems), NULL);
 
     PyDict_Clear(ob_mems);

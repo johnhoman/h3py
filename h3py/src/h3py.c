@@ -1,6 +1,7 @@
 #include <Python.h>
 #include "structmember.h"
 #include <h3api.h>
+#include <h3Index.h>
 #include <stddef.h>
 #include <stdio.h>
 
@@ -8,6 +9,27 @@
 #include <pygeocoord.h>
 #include <pyh3index.h>
 #include <pygeoboundary.h>
+
+
+PyObject *
+set_h3_index(PyObject *self, PyObject *args) {
+    PyObject *h3ob;
+    H3Index h3;
+    int res = 0, base_cell = 0, init_digit = 0;
+
+    if (!PyArg_ParseTuple(args, "Oiii", &h3ob, &res, &base_cell, &init_digit)){
+         PyErr_SetString(PyExc_RuntimeError,
+             "Could not parse arguments for function 'h3py.set_h3_index'.");
+         return NULL;
+    }
+
+    h3 = PyH3Index_AS_H3Index((PyH3IndexObject *)h3ob);
+    setH3Index(&h3, res, base_cell, init_digit);
+    PyH3Index_AS_H3Index((PyH3IndexObject *)h3ob) = h3;
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
 
 
 static H3Index *
@@ -35,15 +57,9 @@ _PyList_FromH3IndexSet(H3Index *h3in, size_t size)
 
     h3out = PyList_New(listsize);
     for (i = 0; i < listsize; ++i) {
-        if (h3in[i] == 0) {
-            /* if the h3 index is invalid, put None in it's place */
-            Py_INCREF(Py_None);
-            e  = Py_None;
-        } else {
-            h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
-            PyH3Index_AS_H3Index(h3) = h3in[i];
-            e = (PyObject *)h3;
-        }
+        h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
+        PyH3Index_AS_H3Index(h3) = h3in[i];
+        e = (PyObject *)h3;
         PyList_SET_ITEM(h3out, i, e);
     }
     return h3out;
@@ -338,14 +354,78 @@ _kRing(PyObject *self, PyObject *args){
 
 static PyObject *
 _kRingDistances(PyObject *self, PyObject *args){
-      
-    return Py_None;
+    PyObject *origin;
+    int k = 0, size = 0;
+
+    if (!PyArg_ParseTuple(args, "Oi", &origin, &k)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Could not parse args for function 'h3py.kRing'.");
+        return NULL;
+    }
+
+    if (!PyH3Index_Check(origin)) {
+        PyErr_SetString(PyExc_TypeError,
+            "Position argument 1 must be of type 'h3py.H3Index'.");
+    }
+
+    Py_INCREF(origin);
+    size = H3_EXPORT(maxKringSize)(k);
+
+    H3Index out[size];
+    _init_h3indexset(out, size);
+    int distances[size];
+
+    H3Index h3 = PyH3Index_AS_H3Index((PyH3IndexObject *)origin);
+    H3_EXPORT(kRingDistances)(h3, k, out, distances);
+
+    Py_DECREF(origin);
+    PyObject *kring, *kring_distances, *item;
+
+    kring = _PyList_FromH3IndexSet(out, size);
+    kring_distances = PyList_New(size);
+    ssize_t i;
+    for (i = 0; i < size; ++i) {
+        item = PyLong_FromLong((long)distances[i]);
+        PyList_SET_ITEM(kring_distances, (Py_ssize_t)i, item);
+    }
+
+    return Py_BuildValue("(OO)", kring, kring_distances);
 }
 
 static PyObject *
 _hexRing(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
+    PyObject *_origin;
+    int k = 0, size = 0, err = 0;
+
+    if (!PyArg_ParseTuple(args, "Oi", &_origin, &k)) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Cannot parse arguments for function 'h3py.hex_ring'.");
+        return NULL;
+    }
+
+    if (!PyH3Index_Check(_origin)) {
+        PyErr_SetString(PyExc_TypeError,
+            "Position argument 1 must be of type 'h3py.H3Index'.");
+        return NULL;
+    }
+
+    Py_INCREF(_origin);
+    size = H3_EXPORT(maxKringSize)(k);
+
+    H3Index out[size];
+    _init_h3indexset(out, size);
+
+    H3Index origin = PyH3Index_AS_H3Index((PyH3IndexObject *)_origin);
+    err = H3_EXPORT(hexRing)(origin, k, out);
+
+    if (err != 0) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "Unknown error encountered getting hex ring.");
+        return NULL;
+    }
+
+    Py_DECREF(_origin);
+    return _PyList_FromH3IndexSet(out, size);
 }
 
 static PyObject *
@@ -714,6 +794,7 @@ static PyMethodDef h3py_methods[] = {
         (PyCFunction)_getH3UnidirectionalEdgeBoundary,
         METH_VARARGS,
         "Returns the GeoBoundary containing the coordinates of the edge"},
+    {"set_h3_index", (PyCFunction)set_h3_index, METH_VARARGS, ""},
     {NULL}
 
 };

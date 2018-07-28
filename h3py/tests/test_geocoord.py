@@ -1,4 +1,4 @@
-from h3py import H3Index, GeoCoord, geoToH3
+from h3py import H3Index, GeoCoord, geo_to_h3
 import numpy as np
 import pytest
 from glob import glob

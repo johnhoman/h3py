@@ -3,7 +3,7 @@ install:
 	  @rm -rf build && python setup.py install
 
 test:
-		@cd h3py && python -m pytest --cov=. tests/ --cov-report=term --cache-clear && cd ..
+		@cd h3py && python -m pytest -sv --cov=. tests/ --cov-report=term --cache-clear && cd ..
 
 h3-clone:
 	  git clone https://github.com/uber/h3.git h3py/h3

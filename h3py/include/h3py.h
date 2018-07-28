@@ -22,6 +22,7 @@ extern "C" {
 
 
 /* API-Functions  */
+PyObject *set_h3_index(PyObject *self, PyObject *args);
 static PyObject *_geoToH3(PyObject *self, PyObject *args);
 static PyObject *_h3ToGeo(PyObject *self, PyObject *args);
 static PyObject *_h3ToGeoBoundary(PyObject *self, PyObject *args);

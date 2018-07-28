@@ -22,4 +22,6 @@ h3py_ext = Extension('_h3py',
                       extra_compile_args=['-Wno-unused-function'],
                       undef_macros=['NDEBUG'])
 
-setup(name='_h3py', ext_modules=[h3py_ext])
+setup(name='_h3py',
+      ext_modules=[h3py_ext],
+      packages=['h3py'])

@@ -1,5 +1,5 @@
 import pytest
-from h3py import H3Index, GeoCoord, GeoBoundary, h3ToGeo
+from h3py import H3Index, GeoCoord, GeoBoundary
 from glob import glob
 import os
 from math import isclose
@@ -71,9 +71,7 @@ def test_to_string():
 def test_from_string():
     """test H3Index.from_string method"""
 
-    with pytest.raises(ValueError):
-        H3Index.from_string("")
-    with pytest.raises(ValueError):
-        H3Index.from_string("**")
+    assert not H3Index.from_string("").is_valid()
+    assert not H3Index.from_string("**").is_valid()
     with pytest.raises(ValueError):
         H3Index.from_string("ffffffffffffffff")
