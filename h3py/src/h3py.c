@@ -54,6 +54,7 @@ _validate_h3_list_input(PyObject *h3set)
 {
     if (!PyList_Check(h3set)) {
         return -1;
+    }
     else {
         PyObject *ob;
         Py_ssize_t i;
@@ -337,7 +338,7 @@ _kRing(PyObject *self, PyObject *args){
 
 static PyObject *
 _kRingDistances(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
+      
     return Py_None;
 }
 
@@ -719,14 +720,14 @@ static PyMethodDef h3py_methods[] = {
 
 static struct PyModuleDef moduledef = {
      PyModuleDef_HEAD_INIT,
-     "h3py",
+     "_h3py",
      NULL,
      -1,
      h3py_methods
 };
 
 PyMODINIT_FUNC
-PyInit_h3py(void)
+PyInit__h3py(void)
 {
     PyObject *module = PyModule_Create(&moduledef);
 
