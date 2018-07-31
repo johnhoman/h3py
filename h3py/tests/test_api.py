@@ -59,7 +59,7 @@ test_coords = [
 def test_tag_frame_state():
 
     test_df = pd.DataFrame(test_coords, dtype=np.float32)
-    import pdb; pdb.set_trace()
+
     def tag(row, res):
         h3 = GeoCoord.from_degrees(row['lat'], row['lon']).to_h3(res)
         row['h3'] = int(h3)
