@@ -13,6 +13,9 @@
 extern "C" {
 #endif
 
+/* fwd declare */
+
+
 static struct PyModuleDef moduledef = {
      PyModuleDef_HEAD_INIT,
      "h3py",
