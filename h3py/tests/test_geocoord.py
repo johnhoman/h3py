@@ -1,4 +1,4 @@
-from h3py import H3Index, GeoCoord
+from h3py import H3Index, GeoCoord, geo_to_h3
 import numpy as np
 import pytest
 from glob import glob
@@ -11,8 +11,8 @@ def test_get_set_lat_lon():
     """Verify the getters and setters from the c
     end are working
     """
-    ray = zip(np.random.random(100) * 180,
-              np.random.random(100) * 180)
+    ray = zip(np.random.random(100) * 2 * np.pi,
+              np.random.random(100) * 2 * np.pi)
     for lat, lon in ray:
         coordinates = GeoCoord(lat, lon)
         coordinates.lat = lat - 5
@@ -32,7 +32,6 @@ def test_to_h3():
     def assert_expected(h1: H3Index, g1: GeoCoord):
         assert isinstance(h1, H3Index)
         assert isinstance(g1, GeoCoord)
-
         h2 = g1.to_h3(h1.get_resolution())
         assert h1 == h2, "got unexpected GeoCoord.to_h3 output"
 

@@ -2,3 +2,4 @@ h3/
 build/
 .cache
 *.pyc
+.coverage

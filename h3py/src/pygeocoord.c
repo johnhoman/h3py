@@ -8,9 +8,6 @@
 #include "pygeocoord.h"
 #include "pyh3index.h"
 
-static PyTypeObject geocoord_type;
-
-
 
 static PyObject *
 PyGeoCoord_to_h3(PyGeoCoordObject *self, PyObject *args)
@@ -163,11 +160,42 @@ PyGeoCoord_setlon(PyGeoCoordObject *self, PyObject *value, void *closure)
 }
 
 static PyObject *
+PyGeoCoord_asdict(PyGeoCoordObject *self)
+{
+    PyObject *dict;
+
+    dict = PyDict_New();
+    PyDict_SetItemString(dict, "lat", PyFloat_FromDouble(PyGeoCoord_Lat(self)));
+    PyDict_SetItemString(dict, "lon", PyFloat_FromDouble(PyGeoCoord_Lon(self)));
+
+    return dict;
+}
+
+static PyObject *
 PyGeoCoord_repr(PyGeoCoordObject *self)
 {
-    return PyUnicode_FromFormat("GeoCoord: {lat: %R, lon: %R}",
-                                PyFloat_FromDouble(PyGeoCoord_Lat(self)),
-                                PyFloat_FromDouble(PyGeoCoord_Lon(self)));
+    PyObject *ob_mems, *pprint, *pformat, *repr;
+
+    pprint = PyImport_ImportModuleNoBlock("pprint");
+    Py_INCREF(pprint);
+    pformat = PyObject_GetAttrString(pprint, "pformat");
+    Py_INCREF(pformat);
+
+    if (!PyCallable_Check(pformat)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+
+
+    ob_mems = PyGeoCoord_asdict(self);
+    repr = PyObject_Call(pformat, Py_BuildValue("(O)", ob_mems), NULL);
+
+    PyDict_Clear(ob_mems);
+    Py_DECREF(ob_mems);
+    Py_DECREF(pformat);
+    Py_DECREF(pprint);
+    return repr;
+
 }
 
 static PyObject *

@@ -6,8 +6,29 @@
 #include <stdio.h>
 #include <assert.h>
 
+
+#include <h3py.h>
 #include <pyh3index.h>
 #include <pygeocoord.h>
+#include <pygeoboundary.h>
+
+
+static PyObject *
+PyH3Index_set(PyTypeObject *cls, PyObject *args)
+{
+    PyObject *arguments;
+    PyH3IndexObject *self;
+    self = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
+    arguments = Py_BuildValue("(OOOO)",
+                              self,
+                              PyTuple_GetItem(args, 0),
+                              PyTuple_GetItem(args, 1),
+                              PyTuple_GetItem(args, 2));
+    Py_INCREF(Py_None);
+    set_h3_index(/* need module access */Py_None, arguments);
+    return (PyObject *)self;
+
+}
 
 static PyObject *
 PyH3Index_get_resolution(PyH3IndexObject *self)
@@ -32,12 +53,30 @@ PyH3Index_get_base_cell(PyH3IndexObject *self)
 }
 
 static PyObject *
+PyH3Index_to_boundary(PyH3IndexObject *self)
+{
+    H3Index h3;
+    GeoBoundary *gp;
+    PyGeoBoundaryObject *boundary;
+
+    boundary = PyGeoBoundary_New();
+    assert(boundary != NULL);
+
+    /* TODO: NULL check */
+    gp = PyGeoBoundary_AS_GeoBoundary(boundary);
+    h3 = PyH3Index_AS_H3Index(self);
+    H3_EXPORT(h3ToGeoBoundary)(h3, gp);
+
+    return (PyObject *)boundary;
+}
+
+
+static PyObject *
 PyH3Index_from_string(PyObject *unused, PyObject *args)
 {
-    PyObject *u_str;
-    const char *str;
+    PyObject *u_str, *arglist;
     H3Index h3;
-    PyObject *arglist;
+    const char *str;
 
     if(!PyArg_ParseTuple(args, "O", &u_str)) {
         PyErr_SetString(PyExc_ValueError,
@@ -85,13 +124,13 @@ PyH3Index_is_valid(PyH3IndexObject *self)
     return PyBool_FromLong((long)is_valid);
 }
 
-static PyObject *
+PyObject *
 PyH3Index_to_geocoord(PyH3IndexObject *self)
 {
     PyGeoCoordObject *coord;
+    PyObject *arglist;
     GeoCoord *g;
     H3Index h3;
-    PyObject *arglist;
 
 
     arglist = Py_BuildValue("dd", 0.0, 0.0);
@@ -160,7 +199,7 @@ PyH3Index_init(PyH3IndexObject *self, PyObject *args, PyObject *kwds)
             "Input argument 'index' must be an integer");
     }
 
-    if (h3_index <= 0) {
+    if (h3_index < 0) {
         PyErr_SetString(PyExc_ValueError,
             "Invalid h3 value. Index must be > 0.");
         return -1;
@@ -196,7 +235,7 @@ PyH3Index_richcompare(PyObject *self, PyObject *other, int op)
         h3_other = (H3Index)PyLong_AsLong(other);
     }
     else if (PyH3Index_Check(other)) {
-        h3_other = ((PyH3IndexObject *)other)->ob_val;
+        h3_other = PyH3Index_AS_H3Index((PyH3IndexObject *)other);
     }
     else {
         PyErr_SetString(PyExc_TypeError,
@@ -226,7 +265,10 @@ PyH3Index_richcompare(PyObject *self, PyObject *other, int op)
 static PyObject *
 PyH3Index_repr(PyH3IndexObject *self)
 {
-    return PyUnicode_FromFormat("H3Index: %ld", self->ob_val);
+
+    return PyObject_Repr(PyNumber_ToBase(
+      PyLong_FromLongLong(self->ob_val), 16
+    ));
 }
 
 /* not used */
@@ -262,9 +304,50 @@ PyH3Index_setindex(PyH3IndexObject *self, PyObject *value, void *closure)
         return -1;
     }
 }
+static PyObject *
+PyH3Index_int(PyH3IndexObject *self)
+{
+    return PyLong_FromLongLong(self->ob_val);
+}
 
 static PyMemberDef PyH3Index_members[] = {
     {NULL}
+};
+PyNumberMethods PyH3IndexNumbersMethods = {
+     0,                          /* nb_add */
+     0,                          /* nb_subtract */
+     0,                          /* nb_multiply */
+     0,                          /* nb_remainder */
+     0,                          /* nb_divmod */
+     0,                          /* nb_power */
+     0,                          /* nb_negative */
+     0,                          /* nb_positive */
+     0,                          /* nb_absolute */
+     0,                          /* nb_bool */
+     0,                          /* nb_invert */
+     0,                          /* nb_lshift */
+     0,                          /* nb_rshift */
+     0,                          /* nb_and */
+     0,                          /* nb_xor */
+     0,                          /* nb_or */
+     (unaryfunc)PyH3Index_int,   /* nb_int */
+     NULL,                       /* nb_reserved */
+     0,                          /* nb_float */
+     0,                          /* nb_inplace_add */
+     0,                          /* nb_inplace_subtract */
+     0,                          /* nb_inplace_multiply */
+     0,                          /* nb_inplace_remainder */
+     0,                          /* nb_inplace_power */
+     0,                          /* nb_inplace_lshift */
+     0,                          /* nb_inplace_rshift */
+     0,                          /* nb_inplace_and */
+     0,                          /* nb_inplace_xor */
+     0,                          /* nb_inplace_or */
+     0,                          /* nb_floor_divide */
+     0,                          /* nb_true_divide */
+     0,                          /* nb_inplace_floor_divide */
+     0,                          /* nb_inplace_true_divide */
+     0                           /* nb_index */
 };
 
 static PyMethodDef PyH3Index_methods[] = {
@@ -274,7 +357,11 @@ static PyMethodDef PyH3Index_methods[] = {
     METH_NOARGS, ""},
     {"from_string", (PyCFunction)PyH3Index_from_string,
     METH_VARARGS | METH_STATIC, ""},
+    {"set", (PyCFunction)PyH3Index_set,
+    METH_VARARGS | METH_STATIC, ""},
     {"to_string", (PyCFunction)PyH3Index_to_string,
+    METH_VARARGS, ""},
+    {"to_boundary", (PyCFunction)PyH3Index_to_boundary,
     METH_VARARGS, ""},
     {"to_coord", (PyCFunction)PyH3Index_to_geocoord,
     METH_NOARGS, "find the lat/lon center point g of the cell h3."},
@@ -294,7 +381,7 @@ PyTypeObject PyH3Index_Type = {
      0,                                          /* tp_setattr */
      0,                                          /* tp_reserved */
      (reprfunc)PyH3Index_repr,                   /* tp_repr */
-     0,                                          /* tp_as_number */
+     &PyH3IndexNumbersMethods,                   /* tp_as_number */
      0,                                          /* tp_as_sequence */
      0,                                          /* tp_as_mapping */
      0,                                          /* tp_hash */
