@@ -1,803 +1,547 @@
 #include <Python.h>
 #include "structmember.h"
 #include <h3api.h>
-#include <h3Index.h>
-#include <stddef.h>
 #include <stdio.h>
 
-#include <h3py.h>
-#include <pygeocoord.h>
-#include <pyh3index.h>
-#include <pygeoboundary.h>
+#define rad2deg(x) (x * M_PI / 180)
+#define deg2rad(x) (x / M_PI * 180)
+#define CHECK_REF(x) \
+    printf("ref_count " #x " :%ld, (line %d)\n", Py_REFCNT(x), __LINE__)
+/* GeoCoord */
+static PyTypeObject geocoord_type;
+static PyTypeObject geoboundary_type;
+static PyTypeObject geoboundaryiter_type;
+// static PyTypeObject geofence_type;
 
 
-PyObject *
-set_h3_index(PyObject *self, PyObject *args) {
-    PyObject *h3ob;
-    H3Index h3;
-    int res = 0, base_cell = 0, init_digit = 0;
+typedef struct {
+    PyObject_HEAD
+    GeoCoord ob_val;
+    int deg; /* 1 - units in degrees, 0 - units in radians */
+} geocoord_object;
 
-    if (!PyArg_ParseTuple(args, "Oiii", &h3ob, &res, &base_cell, &init_digit)){
-         PyErr_SetString(PyExc_RuntimeError,
-             "Could not parse arguments for function 'h3py.set_h3_index'.");
-         return NULL;
-    }
+typedef struct {
+    PyObject_HEAD
+    GeoBoundary ob_val;
+} geoboundary_object;
 
-    h3 = PyH3Index_AS_H3Index((PyH3IndexObject *)h3ob);
-    setH3Index(&h3, res, base_cell, init_digit);
-    PyH3Index_AS_H3Index((PyH3IndexObject *)h3ob) = h3;
+typedef struct {
+    PyObject_HEAD
+    Py_ssize_t it_index;
+    geoboundary_object *it_seq;
+} geoboundaryiter_object;
 
-    Py_INCREF(Py_None);
-    return Py_None;
-}
+typedef struct {
+    PyObject_HEAD
+    Geofence ob_val;
+} geofence_object;
+
+typedef struct {
+    PyObject_HEAD
+    geofence_object *it_seq;
+} geofenceiter_object;
+
+typedef struct {
+    PyObject_HEAD
+    GeoPolygon ob_val;
+} geopolygon_object;
 
 
-static H3Index *
-_init_h3indexset(H3Index *in, size_t size)
-{
-    /* Assign invalid h3 indices to h3 index vector `in` */
-    size_t i;
-    for (i = 0; i < size; ++i) {
-        in[i] = 0;
-    }
-    return in;
-}
+/* GeoCoord methods forward declare */
+static geocoord_object *geocoord_new_impl(PyTypeObject *, PyObject *, PyObject *, PyObject *);
+static PyObject *geocoord_new(PyTypeObject *, PyObject *, PyObject *);
+
+/* GeoBoundary forward declare */
+static geoboundary_object *geoboundary_new_impl(PyTypeObject *, PyObject *);
+static PyObject *geoboundary_new(PyTypeObject *, PyObject *, PyObject *);
+static PyObject *geoboundary_iter(PyObject *ob);
+static void geoboundary_dealloc(geoboundary_object *ob);
+
+/*  geoboundary_iter forward declare */
+static PyObject *geoboundaryiter_len(geoboundaryiter_object *it);
+static PyObject *geoboundaryiter_reduce(geoboundaryiter_object *it);
+static PyObject *geoboundaryiter_setstate(geoboundaryiter_object *it, PyObject *state);
+static void geoboundaryiter_dealloc(geoboundaryiter_object *it);
+static int geoboundaryiter_traverse(geoboundaryiter_object *it, visitproc visit, void *arg);
+static PyObject *geoboundaryiter_next(geoboundaryiter_object *it);
+
+/* geofence */
+/* geopolygon */
+
+
+PyDoc_STRVAR(geocoord_toh3_doc,
+"geocoord_toh3(g, res) - get the h3 index corresponding \n\
+    to the location specified by GeoCoord object `g` at \n\
+    special resolution 'res'. \n\
+\n\
+    Parameters\n\
+    ----------\n\
+    g: GeoCoord\n\
+        GeoCoord object with members lat, lon in radians\n\
+    res: int\n\
+        h3 resolution in the inclusive range 0->15\n\
+\n\
+    Returns\n\
+    -------\n\
+    int:\n\
+        h3 index");
+
+static PyObject *geocoord_toh3(PyObject *, PyObject *);
+static PyObject *geocoord_toh3_impl(geocoord_object *, PyObject *);
+
+PyDoc_STRVAR(h3to_geocoord_doc,
+"h3to_geocoord(h3, deg=False) - get the latitude, longitude coordinate \n\
+    center point in radians from index `h3`.\n\
+\n\
+    Parameters\n\
+    ----------\n\
+    h3: int\n\
+        valid h3 index\n\
+    deg: bool, default False\n\
+        return the GeoCoord object with coordiantes in degrees if\n\
+        `deg=True` otherwise, return coordiantes in radians\n\
+\n\
+    Returns\n\
+    -------\n\
+    GeoCoord:\n\
+        GeoCoord object with coordinate location described by h3 index `h3`\n");
+
+static PyObject *h3to_geocoord(PyObject *, PyObject *, PyObject *);
+static geocoord_object *h3to_geocoord_impl(PyObject *, PyObject *);
+
+PyDoc_STRVAR(h3to_geoboundary_doc,
+"h3to_geoboundary(h3) - give the cell boundary in lat/lon\n\
+    coordinates for the cell h3\n\
+\n\
+    Parameters\n\
+    ----------\n\
+    h3: int\n\
+        valid h3 index\n\
+\n\
+    Returns\n\
+    -------\n\
+    GeoBoundary:\n\
+        GeoBoundary object holding at most 10 GeoCoord objects\n\
+\n\
+    Examples\n\
+    --------\n\
+    >>> from h3py import h3to_geoboundary, GeoCoord\n\
+    >>> from pprint import pprint\n\
+    >>> h3 = GeoCoord(75.0, 33.8, deg=True).toh3(1)\n\
+    >>> boundary = h3to_geoboundary(h3)\n\
+    >>> it = iter(boundary)\n\
+    >>> pprint(list(it))\n\
+    [<h3py.GeoCoord object at 0x7f0f57c3dd10>,\n\
+     <h3py.GeoCoord object at 0x7f0f57c3dd30>,\n\
+     <h3py.GeoCoord object at 0x7f0f57c3dd50>,\n\
+     <h3py.GeoCoord object at 0x7f0f57c3dd70>,\n\
+     <h3py.GeoCoord object at 0x7f0f57c3ddf0>,\n\
+     <h3py.GeoCoord object at 0x7f0f57c3dd90>]\n\
+");
+
+static PyObject *h3to_geoboundary(PyObject *, PyObject *, PyObject *);
+
+PyDoc_STRVAR(maxkringsize_doc,
+"max_kring_size(k) - maximum number of indicies that result from the kring\n\
+    algorithm with the given k `k`\n\
+\n\
+    Parameters\n\
+    ----------\n\
+    k: int\n\
+        number of rings\n\
+\n\
+    Returns\n\
+    -------\n\
+    kring_size: int\n\
+        number of hexagons in kring\n\
+\n\
+    Examples\n\
+    --------\n\
+    >>> from _h3py import maxkringsize\n\
+    >>> maxkringsize(3)\n\
+    >>> \n\
+");
+
+static PyObject *
+maxkringsize(PyObject *m, PyObject *args, PyObject *kwds);
+
+PyDoc_STRVAR(hexrange_doc,
+"hex_range(origin, k) - get the hexagon neighbors in all directions,\n\
+    assuming no pentagons\n\
+\n\
+    Parameters\n\
+    ----------\n\
+    origin: int (H3Index)\n\
+        center H3Index\n\
+    k: int\n\
+        number of rings to return from origin\n\
+\n\
+    Returns\n\
+    -------\n\
+    H3Indexes: [int]\n\
+        H3 indexes\n\
+\n\
+    Examples\n\
+    --------\n\
+    >>> from h3py import GeoCoord, hex_range_distances\n\
+    >>> h3 = GeoCoord(75.0, -103.2, deg=True).toh3(2)\n\
+    >>> hex_range(h3, 1)\n\
+    [588367363720609791,\n\
+     588366813964795903,\n\
+     588368463232237567,\n\
+     588940759034494975,\n\
+     588873688825200639,\n\
+     588875887848456191,\n\
+     588369562743865343]\n\
+    >>> \n\
+\n");
 
 
 static PyObject *
-_PyList_FromH3IndexSet(H3Index *h3in, size_t size)
-{
-    /* Create a python list from an H3Index vector h3in. */
-    PyObject *h3out, *e;
-    PyH3IndexObject *h3;
-    Py_ssize_t listsize ,i;
+hexrange(PyObject *m, PyObject *args, PyObject *kwds);
 
-    listsize = (Py_ssize_t)size;
-
-
-    h3out = PyList_New(listsize);
-    for (i = 0; i < listsize; ++i) {
-        h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
-        PyH3Index_AS_H3Index(h3) = h3in[i];
-        e = (PyObject *)h3;
-        PyList_SET_ITEM(h3out, i, e);
-    }
-    return h3out;
-}
-
-static int
-_validate_h3_list_input(PyObject *h3set)
-{
-    if (!PyList_Check(h3set)) {
-        return -1;
-    }
-    else {
-        PyObject *ob;
-        Py_ssize_t i;
-        for (i = 0; i < PyList_Size(h3set); ++i) {
-            ob = PyList_GetItem(h3set, i);
-            if (!PyH3Index_Check(ob)) {
-                return -1;
-            }
-        }
-    }
-
-    return 0;
-}
-
-static void
-_h3index_fromlist(H3Index *h3setin, PyObject *h3set)
-{
-    PyH3IndexObject *h3;
-    Py_ssize_t i;
-    for (i = 0; i < PyList_Size(h3set); ++i) {
-        h3 = (PyH3IndexObject *)PyList_GetItem(h3set, i);
-        h3setin[i] = PyH3Index_AS_H3Index(h3);
-    }
-}
-
+PyDoc_STRVAR(hexrangedistances_doc,
+"hex_range_distances(origin, k) - produces indexes within k distances of the\n\
+    origin index. Output behavior is undefined when one of the indexes returned\n\
+    by the function is a pentagon or is in the pentagon distortion area.\n\
+    \n\
+    k-ring 0 is defined as the origin index, k-ring 1 is defined as k-ring 0\n\
+    and all neighboring indexes, and so on.\n\
+    \n\
+    Output is placed in a list and is in order of increasing distance from\n\
+    the origin.\n\
+    \n\
+    Parameters\n\
+    ----------\n\
+    origin: int (H3Index)\n\
+        center H3Index\n\
+    k: int\n\
+        number of rings to return from origin\n\
+    \n\
+    Returns\n\
+    -------\n\
+    H3Indexes, distances: [(int, int)]\n\
+        H3 indicies and their corresponding distances from the origin\n\
+    \n\
+    Examples\n\
+    --------\n\
+    >>> from h3py import GeoCoord, hex_range_distances\n\
+    >>> h3 = GeoCoord(75.0, -103.2, deg=True).toh3(2)\n\
+    >>> hex_range_distances(h3, 1)\n\
+    [(588367363720609791, 0),\n\
+     (588366813964795903, 1),\n\
+     (588368463232237567, 1),\n\
+     (588940759034494975, 1),\n\
+     (588873688825200639, 1),\n\
+     (588875887848456191, 1),\n\
+     (588369562743865343, 1)]\n\
+    >>> \n\
+\n");
 
 static PyObject *
-_geoToH3(PyObject *self, PyObject *args){
+hexrangedistances(PyObject *m, PyObject *args, PyObject *kwds);
 
-    PyGeoCoordObject *g;
-    PyObject *res;
-
-    if (!PyArg_ParseTuple(args, "OO", &g, &res)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Could not parse args for function 'h3py.geoToH3'");
-        return NULL;
-    }
-
-    if (!PyGeoCoord_Check(g)) {
-        PyErr_SetString(PyExc_TypeError,
-            "Function 'geoToH3' expected positional "
-            "argument 1 to be of type 'GeoCoord'.");
-        return NULL;
-    }
-    return PyGeoCoord_to_h3(g, Py_BuildValue("(O)", res));
-}
-
+PyDoc_STRVAR(hexranges_doc,
+"hex_ranges(origins, k) - collections of hex rings sorted by ring for all\n\
+    given hexagons.\n\
+\n");
 
 static PyObject *
-_h3ToGeo(PyObject *self, PyObject *args){
+hexranges(PyObject *m, PyObject *args, PyObject *kwds);
 
-    PyH3IndexObject *h3;
-
-    if (!PyArg_ParseTuple(args, "O", &h3)) {
-        PyErr_SetString(PyExc_RuntimeError, "h3py.h3ToGeo");
-        return NULL;
-    }
-
-    if (!PyH3Index_Check(h3)) {
-        PyErr_SetString(PyExc_RuntimeError, "h3py.h3ToGeo");
-        return NULL;
-    }
-
-    return PyH3Index_to_geocoord(h3);
-}
-
-static PyObject *
-_h3ToGeoBoundary(PyObject *self, PyObject *args){
-    PyH3IndexObject *pyh3;
-    PyGeoBoundaryObject *pygp;
-    GeoBoundary *gp;
-    H3Index h3;
-
-    if (!PyArg_ParseTuple(args, "O!", &PyH3Index_Type ,&pyh3)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Could not parse args for function 'h3ToGeoBoundary'.");
-        return NULL;
-    }
-    Py_INCREF(pyh3);
-
-    h3 = PyH3Index_AS_H3Index(pyh3);
-    pygp = PyGeoBoundary_New();
-    if (pygp == NULL) {
-        PyErr_SetString(PyExc_SystemError,
-            "Could not allocate GeoBoundary object.");
-        Py_DECREF(pyh3);
-        return NULL;
-    }
-
-    gp = PyGeoBoundary_AS_GeoBoundary(pygp);
-    H3_EXPORT(h3ToGeoBoundary)(h3, gp);
-
-    Py_DECREF(pyh3);
-    return (PyObject *)pygp;
-}
+PyDoc_STRVAR(kring_doc,
+"kring(origin, k) - kring produces indices within k distance of the origin\n\
+    index.\n\
+\n\
+    k-ring 0 is defined as the origin index, k-ring 1 is defined as\n\
+    k-ring 0 and all neighboring indices, and so on.\n\
+\n\
+    The output list is in no particular order. Elemented of the output list\n\
+    may be left zero, as can happen when crossing a pentagon.\n\
+\n\
+    Parameters\n\
+    ----------\n\
+    origin: int\n\
+    k: int\n\
+\n");
 
 static PyObject *
-_maxKringSize(PyObject *self, PyObject *args)
-{
-    int k, size;
+kring(PyObject *m, PyObject *args, PyObject *self);
 
-    if (!PyArg_ParseTuple(args, "i", &k)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Could not parse arguments for function 'maxKringSize'.");
-        return NULL;
-    }
 
-    size = H3_EXPORT(maxKringSize)(k);
-    return PyLong_FromLong((long)size);
-}
-
+PyDoc_STRVAR(kring_distances_doc,
+"kring_distances(origin, k) - hexagon neighbors in all directions,\n\
+    reporting distance from origin\n\
+\n\
+    Parameters\n\
+    ----------\n\
+");
 
 static PyObject *
-_hexRange(PyObject *self, PyObject *args){
-    int sz_alloc = 0, k = 0, err = 0;
-    PyH3IndexObject *origin;
+kring_distances(PyObject *m, PyObject *args, PyObject *kwds);
 
-    if (!PyArg_ParseTuple(args, "O!i", &PyH3Index_Type, &origin, &k)) {
-        PyH3_PARSE_ERROR("hexRange");
-        return NULL;
-    }
-    Py_INCREF(origin);
-    sz_alloc = H3_EXPORT(maxKringSize)(k);
-
-    H3Index out[sz_alloc];
-    int i;
-    for (i = 0; i < sz_alloc; ++i) {
-        out[i] = 0;
-    }
-    err = H3_EXPORT(hexRange)(PyH3Index_AS_H3Index(origin), k, out);
-    if (err != 0) {
-        PyErr_Format(PyExc_RuntimeError,
-            "Unknown error occured getting hex range for index '%llu'",
-            PyH3Index_AS_H3Index(origin));
-    }
-
-    PyObject *range;
-    PyH3IndexObject *h3;
-    range = PyList_New(sz_alloc);
-
-    for (i = 0; i < sz_alloc; ++i) {
-        if (out[i] == 0) {
-            Py_INCREF(Py_None);
-            PyList_SET_ITEM(range, (Py_ssize_t)i, Py_None);
-        } else {
-            h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
-            if (h3 == NULL) {
-                PyErr_SetString(PyExc_MemoryError,
-                    "Could not allocate memory for 'h3py.H3Index'.");
-                return NULL;
-            }
-            PyH3Index_AS_H3Index(h3) = out[i];
-            PyList_SET_ITEM(range, (Py_ssize_t)i, (PyObject *)h3);
-        }
-    }
-
-    Py_DECREF(origin);
-    return range;
-}
-
+PyDoc_STRVAR(hex_area_doc,
+"hex_ares(res, units) - hexagon area in square meters or kilometers.\n\
+\n\
+    Parameters\n\
+    ----------\n\
+    res: int\n\
+        h3 resolution\n\
+    units: {'km2', 'm2'}\n\
+        m2 - return units in square meters\n\
+        km2 - return units in square kilometers\n\
+\n\
+    Returns\n\
+    -------\n\
+    float:\n\
+        hexagon area returned with specified units\n\
+\n");
 
 static PyObject *
-_hexRangeDistances(PyObject *self, PyObject *args){
-    int sz_alloc = 0, k = 0, sz_out = 0;
-    PyH3IndexObject *origin;
-
-    if (!PyArg_ParseTuple(args, "O!i", &PyH3Index_Type, &origin, &k)) {
-        PyH3_PARSE_ERROR("hexRangeDistances");
-        return NULL;
-    }
-    Py_INCREF(origin);
-    sz_alloc = H3_EXPORT(maxKringSize)(k);
-
-    H3Index out[sz_alloc];
-    int distances[sz_alloc];
-
-    H3Index h3_origin = PyH3Index_AS_H3Index(origin);
-    sz_out = H3_EXPORT(hexRangeDistances)(h3_origin, k, out, distances);
-
-    PyObject *range, *dists, *distance;
-    PyH3IndexObject *h3;
-
-    range = PyList_New(sz_out);
-    dists = PyList_New(sz_out);
-
-    if (range == NULL || dists == NULL) {
-        PyErr_SetString(PyExc_MemoryError,
-            "Could not allocated memory for return values.");
-        return NULL;
-    }
-
-    size_t ii;
-    for (ii = 0; ii < (size_t)sz_out; ++ii) {
-        h3 = PyObject_New(PyH3IndexObject, &PyH3Index_Type);
-        if (h3 == NULL) {
-            PyErr_SetString(PyExc_MemoryError,
-                "Could not allocate H3Index.");
-            return NULL;
-        }
-        PyH3Index_AS_H3Index(h3) = out[ii];
-        PyList_SET_ITEM(range, (Py_ssize_t)ii, (PyObject *)h3);
-
-        distance = PyLong_FromLong(distances[ii]);
-        if (distance == NULL) {
-            PyErr_SetString(PyExc_MemoryError,
-                "Could not allocated memory for 'int'.");
-            return NULL;
-        }
-        PyList_SET_ITEM(dists, (Py_ssize_t)ii, distance);
-    }
-
-    Py_DECREF(origin);
-    return Py_BuildValue("(OO)", range, dists);
-}
-
-static PyObject *
-_hexRanges(PyObject *self, PyObject *args){
-    PyObject *h3set;
-    int length = 0, k = 0, sz_alloc = 0, err = 0;
-
-    if (!PyArg_ParseTuple(args, "Oi", &h3set, &k)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Error parse arguments for function 'h3py.hexRanges'.");
-        return NULL;
-    }
-
-    Py_INCREF(h3set);
-    if (_validate_h3_list_input(h3set) < 0) {
-        PyErr_SetString(PyExc_TypeError,
-            "Positional argument number 1 must be type 'list' "
-            "and contain only type 'h3py.H3Index'.");
-        return NULL;
-    }
-
-    length = (int)PyList_Size(h3set);
-    sz_alloc = length * H3_EXPORT(maxKringSize)(k);
-    H3Index h3setin[length];
-    _h3index_fromlist(h3setin, h3set);
-
-    /* initialize output array  */
-    H3Index out[sz_alloc];
-    assert(_init_h3indexset(out, sz_alloc) == out);
-
-    err = H3_EXPORT(hexRanges)(h3setin, length, k, out);
-    if (err != 0) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Unknown error occured. Cannot get hex ranges.");
-    }
-
-    Py_DECREF(h3set);
-    return _PyList_FromH3IndexSet(out, sz_alloc);
-}
-
-static PyObject *
-_kRing(PyObject *self, PyObject *args){
-    PyObject *origin;
-    int k = 0, size = 0;
-
-    if (!PyArg_ParseTuple(args, "Oi", &origin, &k)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Could not parse args for function 'h3py.kRing'.");
-        return NULL;
-    }
-
-    if (!PyH3Index_Check(origin)) {
-        PyErr_SetString(PyExc_TypeError,
-            "Positional argument 1 must be of type 'h3py.H3Index'.");
-        return NULL;
-    }
-    Py_INCREF(origin);
-    size = H3_EXPORT(maxKringSize)(k);
-
-    H3Index out[size];
-    _init_h3indexset(out, size);
-
-    H3_EXPORT(kRing)(PyH3Index_AS_H3Index((PyH3IndexObject *)origin), k, out);
-
-    Py_DECREF(origin);
-    return _PyList_FromH3IndexSet(out, size);
-}
-
-static PyObject *
-_kRingDistances(PyObject *self, PyObject *args){
-    PyObject *origin;
-    int k = 0, size = 0;
-
-    if (!PyArg_ParseTuple(args, "Oi", &origin, &k)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Could not parse args for function 'h3py.kRing'.");
-        return NULL;
-    }
-
-    if (!PyH3Index_Check(origin)) {
-        PyErr_SetString(PyExc_TypeError,
-            "Position argument 1 must be of type 'h3py.H3Index'.");
-    }
-
-    Py_INCREF(origin);
-    size = H3_EXPORT(maxKringSize)(k);
-
-    H3Index out[size];
-    _init_h3indexset(out, size);
-    int distances[size];
-
-    H3Index h3 = PyH3Index_AS_H3Index((PyH3IndexObject *)origin);
-    H3_EXPORT(kRingDistances)(h3, k, out, distances);
-
-    Py_DECREF(origin);
-    PyObject *kring, *kring_distances, *item;
-
-    kring = _PyList_FromH3IndexSet(out, size);
-    kring_distances = PyList_New(size);
-    ssize_t i;
-    for (i = 0; i < size; ++i) {
-        item = PyLong_FromLong((long)distances[i]);
-        PyList_SET_ITEM(kring_distances, (Py_ssize_t)i, item);
-    }
-
-    return Py_BuildValue("(OO)", kring, kring_distances);
-}
-
-static PyObject *
-_hexRing(PyObject *self, PyObject *args){
-    PyObject *_origin;
-    int k = 0, size = 0, err = 0;
-
-    if (!PyArg_ParseTuple(args, "Oi", &_origin, &k)) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Cannot parse arguments for function 'h3py.hex_ring'.");
-        return NULL;
-    }
-
-    if (!PyH3Index_Check(_origin)) {
-        PyErr_SetString(PyExc_TypeError,
-            "Position argument 1 must be of type 'h3py.H3Index'.");
-        return NULL;
-    }
-
-    Py_INCREF(_origin);
-    size = H3_EXPORT(maxKringSize)(k);
-
-    H3Index out[size];
-    _init_h3indexset(out, size);
-
-    H3Index origin = PyH3Index_AS_H3Index((PyH3IndexObject *)_origin);
-    err = H3_EXPORT(hexRing)(origin, k, out);
-
-    if (err != 0) {
-        PyErr_SetString(PyExc_RuntimeError,
-            "Unknown error encountered getting hex ring.");
-        return NULL;
-    }
-
-    Py_DECREF(_origin);
-    return _PyList_FromH3IndexSet(out, size);
-}
-
-static PyObject *
-_maxPolyfillSize(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_polyfill(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3SetToLinkedGeo(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_destroyLinkedPolygon(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_degsToRads(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_radsToDegs(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_hexAreaKm2(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_hexAreaM2(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_edgeLengthKm(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_edgeLengthM(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_numHexagons(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3GetResolution(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3GetBaseCell(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_stringToH3(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3ToString(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3IsValid(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3ToParent(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_maxH3ToChildrenSize(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3ToChildren(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_compact(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_maxUncompactSize(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_uncompact(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3isResClassIII(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3IsPentagon(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3IndexesAreNeighbors(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_getH3UnidirectionalEdge(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_h3UnidirectionalEdgeIsValid(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_getOriginH3IndexFromUnidirectionalEdge(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_getDestinationH3IndexFromUnidirectionalEdge(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_getH3IndexesFromUnidirectionalEdge(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_getH3UnidirectionalEdgesFromHexagon(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-static PyObject *
-_getH3UnidirectionalEdgeBoundary(PyObject *self, PyObject *args){
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
+hexarea(PyObject *m, PyObject *args, PyObject *kwds);
+
+static PyMemberDef geocoord_members[] = { {NULL} };
+static PyMethodDef geocoord_methods[] = {
+    {"toh3", (PyCFunction)geocoord_toh3, METH_VARARGS, geocoord_toh3_doc},
+    {"from_h3", (PyCFunction)h3to_geocoord, METH_STATIC, h3to_geocoord_doc},
+    {NULL}
+};
 
 static PyMethodDef h3py_methods[] = {
-    {"geoToH3",
-        (PyCFunction)_geoToH3,
-        METH_VARARGS,
-        "find the H3 index of the resolution res cell containing the lat/lon g"},
-    {"h3ToGeo",
-        (PyCFunction)_h3ToGeo,
-        METH_VARARGS,
-        "find the lat/lon center point g of the cell h3"},
-    {"h3ToGeoBoundary",
-        (PyCFunction)_h3ToGeoBoundary,
-        METH_VARARGS,
-        "give the cell boundary in lat/lon coordinates for the cell h3"},
-    {"maxKringSize",
-        (PyCFunction)_maxKringSize,
-        METH_VARARGS,
-        "maximum number of hexagons in k-ring"},
-    {"hexRange",
-        (PyCFunction)_hexRange,
-        METH_VARARGS,
-        "hexagons neighbors in all directions, assuming no pentagons"},
-    {"hexRangeDistances",
-        (PyCFunction)_hexRangeDistances,
-        METH_VARARGS,
-        "hexagons neighbors in all directions, assuming no pentagons, "
-        "reporting distance from origin"},
-    {"hexRanges",
-        (PyCFunction)_hexRanges,
-        METH_VARARGS,
-        "collection of hex rings sorted by ring for all given hexagons"},
-    {"kRing",
-        (PyCFunction)_kRing,
-        METH_VARARGS,
-        "hexagon neighbors in all directions"},
-    {"kRingDistances",
-        (PyCFunction)_kRingDistances,
-        METH_VARARGS,
-        "hexagon neighbors in all directions, reporting distance from origin"},
-    {"hexRing",
-        (PyCFunction)_hexRing,
-        METH_VARARGS,
-        "hollow hexagon ring at some origin"},
-    {"maxPolyfillSize",
-        (PyCFunction)_maxPolyfillSize,
-        METH_VARARGS,
-        "maximum number of hexagons in the geofence"},
-    {"polyfill",
-        (PyCFunction)_polyfill,
-        METH_VARARGS,
-        "hexagons within the given geofence"},
-    {"h3SetToLinkedGeo",
-        (PyCFunction)_h3SetToLinkedGeo,
-        METH_VARARGS,
-        "Create a LinkedGeoPolygon from a set of contiguous hexagons"},
-    {"destroyLinkedPolygon",
-        (PyCFunction)_destroyLinkedPolygon,
-        METH_VARARGS,
-        "Free all memory created for a LinkedGeoPolygon"},
-    {"degsToRads",
-        (PyCFunction)_degsToRads,
-        METH_VARARGS,
-        "converts degrees to radians"},
-    {"radsToDegs",
-        (PyCFunction)_radsToDegs,
-        METH_VARARGS,
-        "converts radians to degrees"},
-    {"hexAreaKm2",
-        (PyCFunction)_hexAreaKm2,
-        METH_VARARGS,
-        "hexagon area in square kilometers"},
-    {"hexAreaM2",
-        (PyCFunction)_hexAreaM2,
-        METH_VARARGS,
-        "hexagon area in square meters"},
-    {"edgeLengthKm",
-        (PyCFunction)_edgeLengthKm,
-        METH_VARARGS,
-        "hexagon edge length in kilometers"},
-    {"edgeLengthM",
-        (PyCFunction)_edgeLengthM,
-        METH_VARARGS,
-        "hexagon edge length in meters"},
-    {"numHexagons",
-        (PyCFunction)_numHexagons,
-        METH_VARARGS,
-        "number of hexagons for a given resolution"},
-    {"h3GetResolution",
-        (PyCFunction)_h3GetResolution,
-        METH_VARARGS,
-        "returns the resolution of the provided hexagon"},
-    {"h3GetBaseCell",
-        (PyCFunction)_h3GetBaseCell,
-        METH_VARARGS,
-        "returns the base cell of the provided hexagon"},
-    {"stringToH3",
-        (PyCFunction)_stringToH3,
-        METH_VARARGS,
-        "converts the canonical string format to H3Index format"},
-    {"h3ToString",
-        (PyCFunction)_h3ToString,
-        METH_VARARGS,
-        "converts an H3Index to a canonical string"},
-    {"h3IsValid",
-        (PyCFunction)_h3IsValid,
-        METH_VARARGS,
-        "confirms if an H3Index is valid"},
-    {"h3ToParent",
-        (PyCFunction)_h3ToParent,
-        METH_VARARGS,
-        "returns the parent (or grandparent, etc) hexagon of the given hexagon"},
-    {"maxH3ToChildrenSize",
-        (PyCFunction)_maxH3ToChildrenSize,
-        METH_VARARGS,
-        "determines the maximum number of children (or grandchildren, etc) "
-        "that could be returned for the given hexagon"},
-    {"h3ToChildren",
-        (PyCFunction)_h3ToChildren,
-        METH_VARARGS,
-        "provides the children (or grandchildren, etc) of the given hexagon"},
-    {"compact",
-        (PyCFunction)_compact,
-        METH_VARARGS,
-        "compacts the given set of hexagons as best as possible"},
-    {"maxUncompactSize",
-        (PyCFunction)_maxUncompactSize,
-        METH_VARARGS,
-        "determines the maximum number of hexagons that could be uncompacted "
-        "from the compacted set"},
-    {"uncompact",
-        (PyCFunction)_uncompact,
-        METH_VARARGS,
-        "uncompacts the compacted hexagon set"},
-    {"h3isResClassIII",
-        (PyCFunction)_h3isResClassIII,
-        METH_VARARGS,
-        "determines if a hexagon is Class III (or Class II)"},
-    {"h3IsPentagon",
-        (PyCFunction)_h3IsPentagon,
-        METH_VARARGS,
-        "determines if a hexagon is actually a pentagon"},
-    {"h3IndexesAreNeighbors",
-        (PyCFunction)_h3IndexesAreNeighbors,
-        METH_VARARGS,
-        "returns whether or not the provided hexagons border"},
-    {"getH3UnidirectionalEdge",
-        (PyCFunction)_getH3UnidirectionalEdge,
-        METH_VARARGS,
-        "returns the unidirectional edge H3Index for the specified origin and "
-        "destination "},
-    {"h3UnidirectionalEdgeIsValid",
-        (PyCFunction)_h3UnidirectionalEdgeIsValid,
-        METH_VARARGS,
-        "returns whether the H3Index is a valid unidirectional edge"},
-    {"getOriginH3IndexFromUnidirectionalEdge",
-        (PyCFunction)_getOriginH3IndexFromUnidirectionalEdge,
-        METH_VARARGS,
-        "Returns the origin hexagon H3Index from the unidirectional edge H3Index"},
-    {"getDestinationH3IndexFromUnidirectionalEdge",
-        (PyCFunction)_getDestinationH3IndexFromUnidirectionalEdge,
-        METH_VARARGS,
-        "Returns the destination hexagon H3Index from the unidirectional edge H3Index"},
-    {"getH3IndexesFromUnidirectionalEdge",
-        (PyCFunction)_getH3IndexesFromUnidirectionalEdge,
-        METH_VARARGS,
-        "Returns the origin and destination hexagons from the unidirectional edge H3Index"},
-    {"getH3UnidirectionalEdgesFromHexagon",
-        (PyCFunction)_getH3UnidirectionalEdgesFromHexagon,
-        METH_VARARGS,
-        "Returns the 6 (or 5 for pentagons) edges associated with the H3Index"},
-    {"getH3UnidirectionalEdgeBoundary",
-        (PyCFunction)_getH3UnidirectionalEdgeBoundary,
-        METH_VARARGS,
-        "Returns the GeoBoundary containing the coordinates of the edge"},
-    {"set_h3_index", (PyCFunction)set_h3_index, METH_VARARGS, ""},
+    {"geocoord_toh3", (PyCFunction)geocoord_toh3,
+      METH_VARARGS, geocoord_toh3_doc},
+    {"h3to_geocoord", (PyCFunction)h3to_geocoord,
+      METH_VARARGS | METH_KEYWORDS, h3to_geocoord_doc},
+    {"h3to_geoboundary", (PyCFunction)h3to_geoboundary,
+      METH_VARARGS | METH_KEYWORDS, h3to_geoboundary_doc},
+    {"max_kring_size", (PyCFunction)maxkringsize,
+      METH_VARARGS | METH_KEYWORDS, maxkringsize_doc},
+    {"hex_range", (PyCFunction)hexrange,
+      METH_VARARGS | METH_KEYWORDS, hexrange_doc},
+    {"hex_range_distances", (PyCFunction)hexrangedistances,
+      METH_VARARGS | METH_KEYWORDS, hexrangedistances_doc},
+    {"hex_ranges", (PyCFunction)hexranges,
+      METH_VARARGS | METH_KEYWORDS, hexranges_doc},
+    {"kring", (PyCFunction)kring,
+      METH_VARARGS | METH_KEYWORDS, kring_doc},
+    {"kring_distances", (PyCFunction)kring_distances,
+      METH_VARARGS | METH_KEYWORDS, kring_distances_doc},
+    {"hex_area", (PyCFunction)hexarea,
+      METH_VARARGS | METH_KEYWORDS, hex_area_doc},
     {NULL}
-
 };
+
+static geocoord_object *
+geocoord_new_impl(PyTypeObject *tp, PyObject *la, PyObject *lo, PyObject *deg)
+{
+    GeoCoord coord;
+
+    if (PyFloat_Check(la) && PyFloat_Check(lo)) {
+        coord.lat = PyFloat_AsDouble(la);
+        coord.lon = PyFloat_AsDouble(lo);
+    } else {
+        PyErr_Format(PyExc_TypeError,
+          "'GeoCoord' requires signature 'GeoCoord(float, float)'\n\
+                but recieved 'GeoCoord(%s, %s)'",
+           Py_TYPE(la)->tp_name, Py_TYPE(lo)->tp_name);
+        return NULL;
+    }
+    geocoord_object *self = (geocoord_object *)tp->tp_alloc(tp, 0);
+    if (self == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "GeoCoord()");
+        return NULL;
+    }
+    if (PyBool_Check(deg) && deg == Py_False) {
+        self->deg = 0;
+        self->ob_val.lat = coord.lat;
+        self->ob_val.lon = coord.lon;
+    } else if (PyBool_Check(deg) && deg == Py_True) {
+        self->deg = 1;
+        self->ob_val.lat = deg2rad(coord.lat);
+        self->ob_val.lon = deg2rad(coord.lon);
+    } else {
+        PyErr_Format(PyExc_TypeError,
+            "keyword argument 'deg' must be type bool not %s",
+            Py_TYPE(deg)->tp_name);
+        return NULL;
+    }
+    /* TODO: remove calcuation and do comparison in radians */
+    if (rad2deg(self->ob_val.lat) > 90 || rad2deg(self->ob_val.lat < -90)) {
+        PyErr_Format(PyExc_ValueError, "invalid latitude '%S'", la);
+        goto invalid;
+    } else if (rad2deg(self->ob_val.lon) < -180 ||
+               rad2deg(self->ob_val.lon) > 180) {
+        PyErr_Format(PyExc_ValueError, "invalid longitude '%S'", lo);
+        goto invalid;
+    }
+
+    return self;
+
+    invalid:
+        Py_DECREF((PyObject *)self);
+        return NULL;
+}
+
+static PyObject *
+geocoord_new(PyTypeObject *tp, PyObject *args, PyObject *kwds)
+{
+    static char *kwargs[] = {"lat", "lon", "deg", NULL};
+
+    PyObject *la = NULL, *lo = NULL, *deg = NULL;
+    geocoord_object *coord;
+    int err;
+
+    err = !PyArg_ParseTupleAndKeywords(args, kwds, "OO|O:GeoCoord", kwargs,
+                                       &la, &lo, &deg);
+    if (err) {
+        return NULL;
+    } else {
+        if (deg == NULL)
+            deg = Py_False; /* for now, assume radians */
+
+        Py_INCREF(la);
+        Py_INCREF(lo);
+        Py_INCREF(deg);
+    }
+    coord = geocoord_new_impl(tp, la, lo, deg);
+    if (coord == NULL)
+        return NULL;
+
+    Py_DECREF(la);
+    Py_DECREF(lo);
+    Py_DECREF(deg);
+    return (PyObject *)coord;
+}
+
+static PyObject *
+geocoord_toh3_impl(geocoord_object *ob, PyObject *res)
+{
+    H3Index h3;
+    int resolution;
+
+
+    if (!PyLong_Check(res)) {
+        PyErr_Format(PyExc_TypeError,
+            "expected type 'int' but recieved '%s'", Py_TYPE(res)->tp_name);
+        return NULL;
+    } else {
+        resolution = (int)PyLong_AsLong(res);
+        h3 = H3_EXPORT(geoToH3)(&ob->ob_val, resolution);
+        return PyLong_FromLongLong(h3);
+    }
+}
+
+static PyObject *
+geocoord_toh3(PyObject *self, PyObject *args)
+{
+    geocoord_object *coord = NULL;
+    PyObject *res = NULL, *ob;
+    int ok;
+
+    if (PyModule_Check(self)) { /* called as a module function */
+        ok = PyArg_ParseTuple(args, "O!O:geocoord_toh3",
+                              &geocoord_type, &coord, &res);
+
+    } else if (Py_TYPE(self) == &geocoord_type) {
+        ok = PyArg_ParseTuple(args, "O:GeoCoord.toh3", &res);
+        coord = (geocoord_object *)self;
+    } else {
+        PyErr_Format(PyExc_NotImplementedError,
+            "unexpected input argument of type '%s'", Py_TYPE(self)->tp_name);
+        return NULL;
+    }
+
+    if (!ok || coord == NULL || res == NULL) {
+        Py_XDECREF(coord);
+        Py_XDECREF(res);
+        PyErr_SetString(PyExc_RuntimeError,
+            "error parsing args for function 'geocoord_toh3'");
+        return NULL;
+    } else {
+        Py_INCREF(coord);
+        Py_INCREF(res);
+    }
+
+    ob = geocoord_toh3_impl(coord, res);
+    if (ob == NULL)
+        return NULL;
+
+    Py_DECREF(coord);
+    Py_DECREF(res);
+    return ob;
+}
+
+
+
+static void geocoord_dealloc(geocoord_object *);
+static void
+geocoord_dealloc(geocoord_object *g) { Py_TYPE(g)->tp_free((PyObject *)g); }
+
+
+PyDoc_STRVAR(geocoord_doc,
+"GeoCoord(lat, lon, deg=False) - GeoCoord object with latitude and \n\
+    longitude arguments `lat`, `lon` in radians. Input arguments can \n\
+    be in degree units if optional keyword argument `deg=True` as passed. \n\
+\n\
+    Parameters \n\
+    ---------- \n\
+    lat: float \n\
+        latitude coordinate in radians. Degrees if `deg` is True \n\
+    lon: float \n\
+        longitude coordinate in radians. Degrees if `deg` is True\n\
+    deg: bool, default False \n\
+        if True, GeoCoord will use units of degrees, radians will be used \n\
+        otherwise. \n\
+\n\
+    Examples \n\
+    -------- \n\
+    >>> from h3py import GeoCoord \n\
+    >>> coord = GeoCoord(0.710599509, -1.291647896)\n\
+    >>> coord = GeoCoord(40.71435280, -74.00597310, deg=True)\n\
+    >>> \n");
+
+static PyTypeObject geocoord_type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "h3py.GeoCoord",
+    sizeof(geocoord_object),
+    0,
+    (destructor)geocoord_dealloc,               /* tp_dealloc */
+    0,                                          /* tp_print */
+    0,                                          /* tp_getattr */
+    0,                                          /* tp_setattr */
+    0,                                          /* tp_reserved */
+    0,                                          /* tp_repr */
+    0,                                          /* tp_as_number */
+    0,                                          /* tp_as_sequence */
+    0,                                          /* tp_as_mapping */
+    0,                                          /* tp_hash */
+    0,                                          /* tp_call */
+    0,                                          /* tp_str */
+    0,                                          /* tp_getattro */
+    0,                                          /* tp_setattro */
+    0,                                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   /* tp_flags */
+    geocoord_doc,                               /* tp_doc */
+    0,                                          /* tp_traverse */
+    0,                                          /* tp_clear */
+    0,                                          /* tp_richcompare */
+    0,                                          /* tp_weaklistoffset */
+    0,                                          /* tp_iter */
+    0,                                          /* tp_iternext */
+    geocoord_methods,                           /* tp_methods */
+    geocoord_members,                           /* tp_members */
+    0,                                          /* tp_getset */
+    0,                                          /* tp_base */
+    0,                                          /* tp_dict */
+    0,                                          /* tp_descr_get */
+    0,                                          /* tp_descr_set */
+    0,                                          /* tp_dictoffset */
+    0,                                          /* tp_init */
+    0,                                          /* tp_alloc */
+    geocoord_new,                               /* tp_new */
+};
+
+
 
 static struct PyModuleDef moduledef = {
      PyModuleDef_HEAD_INIT,
@@ -812,20 +556,980 @@ PyInit__h3py(void)
 {
     PyObject *module = PyModule_Create(&moduledef);
 
-    if (PyType_Ready(&PyGeoCoord_Type) < 0
-            || PyType_Ready(&PyH3Index_Type) < 0
-            || PyType_Ready(&PyGeoBoundary_Type) < 0){
+    if (PyType_Ready(&geocoord_type) < 0 ||
+        PyType_Ready(&geoboundary_type) < 0 ||
+        PyType_Ready(&geoboundaryiter_type) < 0) {
 
         return NULL;
     }
 
-    Py_INCREF(&PyGeoCoord_Type);
-    Py_INCREF(&PyH3Index_Type);
-    Py_INCREF(&PyGeoBoundary_Type);
-    if(PyModule_AddObject(module, "GeoCoord", (PyObject *)&PyGeoCoord_Type)
-            || PyModule_AddObject(module, "H3Index", (PyObject *)&PyH3Index_Type)
-            || PyModule_AddObject(module, "GeoBoundary", (PyObject *)&PyGeoBoundary_Type)){
+    Py_INCREF(&geocoord_type);
+    if(PyModule_AddObject(module, "GeoCoord", (PyObject *)&geocoord_type) ||
+       PyModule_AddObject(module, "GeoBoundary", (PyObject *)&geoboundary_type)) {
         return NULL;
     }
     return module;
+}
+
+static geocoord_object *
+h3to_geocoord_impl(PyObject *index, PyObject *deg)
+{
+    H3Index h3 = 0;
+    GeoCoord coord;
+    PyObject *la = NULL, *lo = NULL;
+
+    if (PyLong_Check(index)) {
+        h3 = (H3Index)PyLong_AsLong(index);
+        /* TODO: check valid */
+        if (!H3_EXPORT(h3IsValid)(h3)) {
+            PyErr_SetString(PyExc_ValueError,
+                "h3 index is invalid, cannot return GeoCoord");
+            return NULL;
+        } else {
+            H3_EXPORT(h3ToGeo)(h3, &coord);
+            if (deg == Py_True) {
+                coord.lat = rad2deg(coord.lat);
+                coord.lon = rad2deg(coord.lon);
+            }
+            la = PyFloat_FromDouble(coord.lat);
+            lo = PyFloat_FromDouble(coord.lon);
+        }
+    } else {
+        PyErr_Format(PyExc_TypeError,
+            "'h3to_geocoord' expected type 'int' but received '%s' instead.",
+            Py_TYPE(index)->tp_name);
+        return NULL;
+    }
+
+    if (la == NULL || lo == NULL) {
+        PyErr_Format(PyExc_RuntimeError,
+            "unknown exception occured in file %s line (%d)", __FILE__, __LINE__);
+        return NULL;
+    } else {
+        return geocoord_new_impl(&geocoord_type,   la, lo, deg);
+    }
+}
+
+static PyObject *
+h3to_geocoord(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"h3", "deg", NULL};
+
+    PyObject *h3 = NULL, *deg = NULL;
+    int ok;
+
+    ok = PyArg_ParseTupleAndKeywords(args, kwds, "O|O:h3to_geocoord",
+                                     kwlist, &h3, &deg);
+    if (!ok) {
+        PyErr_SetString(PyExc_RuntimeError,
+            "error occured parsing arguments for function 'h3to_geocoord'");
+        return NULL;
+    } else {
+        if (deg == NULL) {
+            deg = Py_False;
+            Py_INCREF(deg);
+        }
+
+        return (PyObject *)h3to_geocoord_impl(h3, deg);
+    }
+}
+
+
+static geoboundary_object *
+geoboundary_new_impl(PyTypeObject *tp, PyObject *seq)
+{
+    geoboundary_object *self;
+    geocoord_object *item;
+    PyObject *it, *iteritem, *(*next)(PyObject *), *type;
+    GeoBoundary gb;
+
+    it = PyObject_GetIter(seq);
+    if (it == NULL)
+        return NULL;
+
+    next = *Py_TYPE(it)->tp_iternext;
+    type = (PyObject *)tp;
+    int i;
+    for (i = 0;;++i) {
+        iteritem = next(it);
+        if (iteritem == NULL)
+            break;
+        if (!PyObject_IsInstance(iteritem, type)) {
+            PyErr_Format(PyExc_TypeError,
+                "invalid input type '%s' found in input sequence",
+                Py_TYPE(iteritem)->tp_name);
+            return NULL;
+        }
+        item = (geocoord_object *)iteritem;
+        if (i >= 10) {
+            PyErr_SetString(PyExc_OverflowError,
+                "iterable contains too many values. GeoBoundary is 10 items max");
+            return NULL;
+        }
+        gb.verts[i].lat = item->ob_val.lat;
+        gb.verts[i].lon = item->ob_val.lon;
+    }
+    gb.numVerts = i + 1;
+
+    self = (geoboundary_object *)tp->tp_alloc(tp, 0);
+    if (self == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "");
+        return NULL;
+    }
+    self->ob_val = gb;
+    return self;
+
+}
+
+static PyObject *
+geoboundary_new(PyTypeObject *tp, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"verts", NULL};
+
+    geoboundary_object *self;
+    PyObject *seq = NULL;
+    int ok;
+
+    ok = PyArg_ParseTupleAndKeywords(args, kwds, "O:GeoBoundary.__new__",
+                                     kwlist, &seq);
+    if (!ok) {
+        return NULL;
+    }
+
+    self = geoboundary_new_impl(tp, seq);
+    if (self == NULL)
+        return NULL;
+
+    return (PyObject *)self;
+}
+static void geoboundary_dealloc(geoboundary_object *self);
+
+static void
+geoboundary_dealloc(geoboundary_object *self)
+{
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyMemberDef geoboundary_members[] = {
+    {NULL}
+};
+
+static PyMethodDef geoboundary_methods[] = {
+    {NULL}
+};
+
+PyDoc_STRVAR(geoboundary_doc,
+"GeoBoundary(geocoords) - GeoBoundary object with latitude and \n\
+    Parameters \n\
+    ---------- \n\
+\n\
+    Examples \n\
+    -------- \n\
+    >>> from h3py import GeoCoord, h3to_geoboundary \n\
+    >>> \n");
+
+static PyTypeObject geoboundary_type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "h3py.GeoBoundary",
+    sizeof(geoboundary_object),
+    0,
+    (destructor)geoboundary_dealloc,            /* tp_dealloc */
+    0,                                          /* tp_print */
+    0,                                          /* tp_getattr */
+    0,                                          /* tp_setattr */
+    0,                                          /* tp_reserved */
+    0,                                          /* tp_repr */
+    0,                                          /* tp_as_number */
+    0,                                          /* tp_as_sequence */
+    0,                                          /* tp_as_mapping */
+    0,                                          /* tp_hash */
+    0,                                          /* tp_call */
+    0,                                          /* tp_str */
+    0,                                          /* tp_getattro */
+    0,                                          /* tp_setattro */
+    0,                                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   /* tp_flags */
+    geoboundary_doc,                            /* tp_doc */
+    0,                                          /* tp_traverse */
+    0,                                          /* tp_clear */
+    0,                                          /* tp_richcompare */
+    0,                                          /* tp_weaklistoffset */
+    geoboundary_iter,                           /* tp_iter */
+    0,                                          /* tp_iternext */
+    geoboundary_methods,                        /* tp_methods */
+    geoboundary_members,                        /* tp_members */
+    0,                                          /* tp_getset */
+    0,                                          /* tp_base */
+    0,                                          /* tp_dict */
+    0,                                          /* tp_descr_get */
+    0,                                          /* tp_descr_set */
+    0,                                          /* tp_dictoffset */
+    0,                                          /* tp_init */
+    0,                                          /* tp_alloc */
+    geoboundary_new,                            /* tp_new */
+};
+
+/********************** geoboundary_iterator ********************************/
+
+static void
+geoboundaryiter_dealloc(geoboundaryiter_object *it)
+{
+    _PyObject_GC_UNTRACK(it);
+    Py_XDECREF(it->it_seq);
+    PyObject_GC_Del(it);
+}
+
+static int
+geoboundaryiter_traverse(geoboundaryiter_object *it, visitproc visit, void *arg)
+{
+    Py_VISIT(it->it_seq);
+    return 0;
+}
+
+static PyObject *
+geoboundaryiter_next(geoboundaryiter_object *it)
+{
+    PyObject *la, *lo, *item;
+    GeoCoord coord;
+    geoboundary_object *ob;
+
+    assert(it != NULL);
+    ob = it->it_seq;
+    if (ob == NULL)
+        return NULL;
+    assert(Py_TYPE(ob) == &geoboundary_type);
+
+    if (it->it_index < ob->ob_val.numVerts) {
+        coord = ob->ob_val.verts[it->it_index];
+        la = PyFloat_FromDouble(coord.lat);
+        lo = PyFloat_FromDouble(coord.lon);
+        item = (PyObject *)geocoord_new_impl(&geocoord_type, la, lo, Py_False);
+
+        ++it->it_index;
+        Py_INCREF(item);
+        Py_DECREF(la);
+        Py_DECREF(lo);
+        return item;
+    }
+
+    it->it_seq = NULL;
+    Py_DECREF(ob);
+    return NULL;
+}
+
+static PyObject *
+geoboundaryiter_len(geoboundaryiter_object *it)
+{
+    Py_ssize_t len = 0;
+    if (it->it_seq)
+        len = PyList_GET_SIZE(it->it_seq) - it->it_index;
+    return PyLong_FromSsize_t(len);
+}
+
+static PyObject *
+geoboundaryiter_reduce(geoboundaryiter_object *it)
+{
+    if (it->it_seq)
+        return Py_BuildValue("N(O)n", _PyObject_GetBuiltin("iter"),
+                             it->it_seq, it->it_index);
+    else
+        return Py_BuildValue("N(())", _PyObject_GetBuiltin("iter"));
+}
+
+static PyObject *
+geoboundaryiter_setstate(geoboundaryiter_object *it, PyObject *state)
+{
+    Py_ssize_t index = PyLong_AsSsize_t(state);
+    if (index == -1 && PyErr_Occurred())
+        return NULL;
+    if (it->it_seq != NULL) {
+        int size = it->it_seq->ob_val.numVerts;
+        if (index < 0)
+            index = 0;
+        else if (index > size)
+            index = size; /* exhausted iterator */
+        it->it_index = index;
+    }
+    Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(gbiter_length_hint_doc,
+    "Private method returning an estimate of len(list(it)).");
+PyDoc_STRVAR(gbiter_reduce_doc, "Return state information for pickling.");
+PyDoc_STRVAR(gbiter_setstate_doc, "Set state information for unpickling.");
+
+static PyMethodDef geoboundaryiter_methods[] = {
+    {"__length_hint__", (PyCFunction)geoboundaryiter_len, METH_NOARGS,
+     gbiter_length_hint_doc},
+    {"__reduce__", (PyCFunction)geoboundaryiter_reduce, METH_NOARGS,
+     gbiter_reduce_doc},
+    {"__setstate__", (PyCFunction)geoboundaryiter_setstate, METH_O,
+     gbiter_setstate_doc},
+    {NULL}
+};
+
+static PyTypeObject geoboundaryiter_type = {
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    "geoboundary_iterator",
+    sizeof(geoboundaryiter_object),
+    0,
+    (destructor)geoboundaryiter_dealloc,
+    0,                                          /* tp_print */
+    0,                                          /* tp_getattr */
+    0,                                          /* tp_setattr */
+    0,                                          /* tp_reserved */
+    0,                                          /* tp_repr */
+    0,                                          /* tp_as_number */
+    0,                                          /* tp_as_sequence */
+    0,                                          /* tp_as_mapping */
+    0,                                          /* tp_hash */
+    0,                                          /* tp_call */
+    0,                                          /* tp_str */
+    PyObject_GenericGetAttr,                    /* tp_getattro */
+    0,                                          /* tp_setattro */
+    0,                                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,    /* tp_flags */
+    0,                                          /* tp_doc */
+    (traverseproc)geoboundaryiter_traverse,     /* tp_traverse */
+    0,                                          /* tp_clear */
+    0,                                          /* tp_richcompare */
+    0,                                          /* tp_weaklistoffset */
+    PyObject_SelfIter,                          /* tp_iter */
+    (iternextfunc)geoboundaryiter_next,         /* tp_iternext */
+    geoboundaryiter_methods,                    /* tp_methods */
+    0,
+};
+
+static PyObject *
+geoboundary_iter(PyObject *ob)
+{
+    geoboundaryiter_object *it;
+
+    if (Py_TYPE(ob) != &geoboundary_type) {
+        PyErr_BadInternalCall();
+        return NULL;
+    }
+    it = PyObject_GC_New(geoboundaryiter_object, &geoboundaryiter_type);
+    if (it == NULL)
+        return NULL;
+    it->it_index = 0;
+    Py_INCREF(ob);
+    it->it_seq = (geoboundary_object *)ob;
+    _PyObject_GC_TRACK(it);
+    return (PyObject *)it;
+}
+/************************** Geofence ****************************************/
+
+// static PyTypeObject geofence_type = {
+//     PyVarObject_HEAD_INIT(&PyType_Type, 0)
+//     "h3py.Geofence",
+//     sizeof(geofence_object),
+//     0,
+//     (destructor)geofence_dealloc,               /* tp_dealloc */
+//     0,                                          /* tp_print */
+//     0,                                          /* tp_getattr */
+//     0,                                          /* tp_setattr */
+//     0,                                          /* tp_reserved */
+//     0,                                          /* tp_repr */
+//     0,                                          /* tp_as_number */
+//     0,                                          /* tp_as_sequence */
+//     0,                                          /* tp_as_mapping */
+//     0,                                          /* tp_hash */
+//     0,                                          /* tp_call */
+//     0,                                          /* tp_str */
+//     0,                                          /* tp_getattro */
+//     0,                                          /* tp_setattro */
+//     0,                                          /* tp_as_buffer */
+//     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   /* tp_flags */
+//     geofence_doc,                               /* tp_doc */
+//     0,                                          /* tp_traverse */
+//     0,                                          /* tp_clear */
+//     0,                                          /* tp_richcompare */
+//     0,                                          /* tp_weaklistoffset */
+//     0,                                          /* tp_iter */
+//     0,                                          /* tp_iternext */
+//     geofence_methods,                           /* tp_methods */
+//     geofence_members,                           /* tp_members */
+//     0,                                          /* tp_getset */
+//     0,                                          /* tp_base */
+//     0,                                          /* tp_dict */
+//     0,                                          /* tp_descr_get */
+//     0,                                          /* tp_descr_set */
+//     0,                                          /* tp_dictoffset */
+//     0,                                          /* tp_init */
+//     0,                                          /* tp_alloc */
+//     0,                                          /* tp_new */
+// };
+
+
+/**************************** api functions ********************************/
+
+
+static geoboundary_object *
+h3to_geoboundary_impl(PyObject *index)
+{
+    H3Index h3;
+    GeoBoundary gp;
+    geoboundary_object *self;
+
+    if (PyLong_Check(index)) {
+        h3 = PyLong_AsLong(index);
+    } else {
+        PyErr_Format(PyExc_TypeError,
+            "expected type 'int' but recieved '%s'",
+            Py_TYPE(index)->tp_name);
+        return NULL;
+    }
+
+    H3_EXPORT(h3ToGeoBoundary)(h3, &gp);
+    self = (geoboundary_object *)PyObject_New(geoboundary_object, &geoboundary_type);
+    int i;
+    for (i = 0; i < gp.numVerts; ++i) {
+        self->ob_val.verts[i].lat = gp.verts[i].lat;
+        self->ob_val.verts[i].lon = gp.verts[i].lon;
+    }
+    self->ob_val.numVerts = gp.numVerts;
+    return self;
+}
+
+static PyObject *
+h3to_geoboundary(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"h3", NULL};
+
+    PyObject *h3 = NULL;
+    geoboundary_object *self;
+
+    if (!PyModule_Check(m)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    } else {
+        if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &h3)) {
+            return NULL;
+        } else {
+            assert(h3 != NULL);
+        }
+    }
+
+    self = h3to_geoboundary_impl(h3);
+    if (self == NULL)
+        return NULL;
+
+    return (PyObject *)self;
+}
+
+static PyObject *
+maxkringsize_impl(PyObject *k)
+{
+    PyObject *size = NULL;
+    int kring_size = 0, kin = 0;
+
+    if (PyLong_Check(k)) {
+        kin = (int)PyLong_AsLong(k);
+    } else {
+        PyErr_Format(PyExc_TypeError,
+            "'maxkringsize' expected argument type 'int' but received '%s'",
+            Py_TYPE(k)->tp_name);
+        return NULL;
+    }
+
+    kring_size = H3_EXPORT(maxKringSize)(kin);
+    size = PyLong_FromLong((long)kring_size);
+    if (size == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    return size;
+}
+
+static PyObject *
+maxkringsize(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"k", NULL};
+
+    PyObject *k = NULL, *size;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O:max_kring_size",
+                                     kwlist, &k)) {
+        return NULL;
+    } else {
+        if (k == NULL) {
+            PyErr_Occurred();
+            return NULL;
+        }
+    }
+
+    size = maxkringsize_impl(k);
+    if (size == NULL)
+        return NULL;
+
+    return size;
+}
+
+static int
+hexrange_parseargs(PyObject *m, PyObject *args, PyObject *kwds, PyObject **origin, PyObject **k)
+{
+    static char *kwlist[] = {"origin", "k", NULL};
+
+    if (!PyModule_Check(m)) {
+        PyErr_BadInternalCall();
+        return 0;
+    } else {
+        if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO", kwlist, origin, k)) {
+            return 0;
+        } else {
+            return 1;
+        }
+    }
+    PyErr_BadInternalCall();
+    return 0;
+}
+
+static PyObject *hexrangedistances_impl(PyObject *, PyObject *);
+
+
+static int
+check_neighbors_inputs(PyObject *origin, PyObject *k)
+{
+    if (!PyLong_Check(origin)) {
+        PyErr_Format(PyExc_TypeError,
+            "expected argument 'origin' (pos 1) to be type 'int'"
+             " but got '%s'", Py_TYPE(origin)->tp_name);
+        return 0;
+    } else if (!PyLong_Check(k)) {
+        PyErr_Format(PyExc_TypeError,
+            "expected argments 'k' (pos 2) to be type 'int' "
+            "but got '%s'", Py_TYPE(k)->tp_name);
+        return 0;
+    }
+    return 1;
+}
+
+static PyObject *
+hexrange_impl(PyObject *origin, PyObject *k)
+{
+    PyObject *ranges, *out, *tup, *item;
+    Py_ssize_t i;
+
+    ranges = hexrangedistances_impl(origin, k);
+    if (ranges == NULL)
+        return NULL;
+    out = PyList_New(PyList_Size(ranges));
+    for (i = 0; i < PyList_Size(ranges); ++i) {
+        tup = PyList_GetItem(ranges, i);
+        if (!PyTuple_Check(tup)) {
+            PyErr_BadInternalCall();
+            return NULL;
+        }
+        item = PyTuple_GetItem(tup, 0);
+        Py_INCREF(item);
+        PyList_SetItem(out, i, item);
+    }
+    Py_DECREF(ranges);
+
+    return out;
+}
+
+static PyObject *
+hexrange(PyObject *m, PyObject *args, PyObject *kwds)
+{
+
+    PyObject *origin, *k, *ob;
+    if (!hexrange_parseargs(m, args, kwds, &origin, &k)) {
+        return NULL;
+    } else {
+        ob = hexrange_impl(origin, k);
+        if (ob == NULL)
+            return NULL;
+
+        return ob;
+    }
+
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+static PyObject *
+hexrangedistances_impl(PyObject *origin, PyObject *k)
+{
+    PyObject *max_size, *item;
+    PyObject *out;
+    int cmax_size = 0, ck = 0;
+    H3Index corigin;
+
+    max_size = maxkringsize_impl(k);
+    if (!check_neighbors_inputs(origin, k)) {
+        return NULL;
+    } else if (!PyLong_Check(max_size)) {
+        PyErr_BadInternalCall();
+        return NULL;
+    } else {
+        cmax_size = PyLong_AsLong(max_size);
+        ck = PyLong_AsLong(k);
+        corigin = PyLong_AsLong(origin);
+
+        if (!H3_EXPORT(h3IsValid)(corigin)) {
+            PyErr_Format(PyExc_ValueError,
+                "invalid index '%S'", origin);
+            return NULL;
+        }
+
+        H3Index cout[cmax_size];
+        int cdistances[cmax_size];
+
+        H3_EXPORT(kRingDistances)(corigin, ck, cout, cdistances);
+
+        out = PyList_New(cmax_size);
+
+        Py_ssize_t i;
+        for (i = 0; i < PyList_Size(out); ++i) {
+            item = Py_BuildValue("(Ki)", cout[i], cdistances[i]);
+            PyList_SET_ITEM(out, i, item);
+        }
+
+        return out;
+    }
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+static PyObject *
+hexrangedistances(PyObject *m, PyObject *args, PyObject *kwds)
+{
+
+    PyObject *origin, *k;
+    if (!hexrange_parseargs(m, args, kwds, &origin, &k)) {
+        return NULL;
+    } else {
+        return hexrangedistances_impl(origin, k);
+    }
+
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+
+static PyObject *
+hexranges_impl(PyObject *origins, PyObject *k)
+{
+    /* it's easier to just implemented this myself than wrap their
+    hexranges code */
+    PyObject *origin, *out, *ranges, *it, *item, *(* next)(PyObject *);
+    Py_ssize_t i, j, num_elements;
+
+    if (!PyList_CheckExact(origins)) {
+        PyErr_Format(PyExc_TypeError,
+            "hex_ranges excepted argument type 'list' (pos 1) but received '%s'",
+            Py_TYPE(origins)->tp_name);
+        return NULL;
+    } else if (!PyLong_Check(k)){
+        PyErr_Format(PyExc_TypeError,
+            "argument 'k' (pos 2) expected type 'int' but received '%s'",
+            Py_TYPE(k)->tp_name);
+        return NULL;
+    } else {
+        num_elements = PyLong_AsSsize_t(maxkringsize_impl(k));
+        out = PyList_New(PyList_Size(origins) * num_elements);
+        it = PyObject_GetIter(origins);
+        if (it == NULL)
+            return NULL;
+        next = Py_TYPE(it)->tp_iternext;
+
+        for (i = 0;; ++i) {
+            origin = next(it);
+            if (origin == NULL)
+                break;
+            if (!PyLong_Check(origin)) {
+                PyErr_Format(PyExc_TypeError,
+                    "sequence must only contain type 'int', not '%s'",
+                    Py_TYPE(origin)->tp_name);
+                return NULL;
+            }
+            ranges = hexrange_impl(origin, k);
+            for (j = 0; j < PyList_Size(ranges); ++j) {
+                item = PyList_GetItem(ranges, j);
+                if (item == NULL) {
+                    PyErr_Occurred();
+                    return NULL;
+                }
+                PyList_SET_ITEM(out, i * num_elements + j, item);
+                Py_INCREF(item);
+            }
+            Py_DECREF(ranges);
+        }
+        return out;
+    }
+
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+
+static PyObject *
+hexranges(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    PyObject *origins, *k;
+    if (!hexrange_parseargs(m, args, kwds, &origins, &k)) {
+        return NULL;
+    } else {
+        return hexranges_impl(origins, k);
+    }
+
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+
+static PyObject *
+kring_impl(PyObject *origin, PyObject *k)
+{
+    PyObject *kring_size, *ring, *item;
+    int kring_size_c, i;
+    Py_ssize_t j;
+
+    if (!check_neighbors_inputs(origin, k)) {
+        return NULL;
+    } else {
+        kring_size = maxkringsize_impl(k);
+        ring = PyList_New(PyLong_AsSsize_t(kring_size));
+        kring_size_c = (int)PyLong_AsLong(kring_size);
+
+        H3Index out[kring_size_c];
+        H3_EXPORT(kRing)(PyLong_AsLong(origin), PyLong_AsLong(k), out);
+
+        for (i = 0, j = 0; i < kring_size_c; ++i, ++j) {
+            item = PyLong_FromLongLong(out[i]);
+            PyList_SET_ITEM(ring, j, item);
+        }
+        return ring;
+    }
+
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+static PyObject *
+kring(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    PyObject *origin, *k;
+    if (!hexrange_parseargs(m, args, kwds, &origin, &k)) {
+        return NULL;
+    } else {
+        return kring_impl(origin, k);
+    }
+}
+
+static PyObject *
+kring_distances_impl(PyObject *origin, PyObject *k)
+{
+    PyObject *ranges, *tup, *max_kring;
+    Py_ssize_t i;
+    int j;
+    size_t size;
+
+    max_kring = maxkringsize_impl(k);
+    if (!check_neighbors_inputs(origin, k)) {
+        return NULL;
+    } else if (max_kring == NULL) {
+        return NULL;
+    } else {
+        size = (size_t)PyLong_AsLong(max_kring);
+        H3Index out[size];
+        int distances[size];
+
+        H3_EXPORT(kRingDistances)(PyLong_AsLong(origin), PyLong_AsLong(k),
+                                  out, distances);
+
+        ranges = PyList_New(PyLong_AsSsize_t(max_kring));
+        for (i = 0, j = 0; i < PyLong_AsSsize_t(max_kring); ++i, ++j) {
+            tup = Py_BuildValue("(Ki)", out[i], distances[i]);
+            PyList_SetItem(ranges, j, tup);
+        }
+
+        return ranges;
+    }
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+static PyObject *
+kring_distances(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    PyObject *origin, *k;
+    if (!hexrange_parseargs(m, args, kwds, &origin, &k)) {
+        return NULL;
+    } else {
+        return kring_distances_impl(origin, k);
+    }
+}
+
+static PyObject *
+hexring_impl(PyObject *origin, PyObject *k)
+{
+    PyObject *item, *num_items, *ring;
+    Py_ssize_t idx;
+
+    if (!check_neighbors_inputs(origin, k)) {
+        return NULL;
+    } else {
+        num_items = maxkringsize_impl(k);
+        if (num_items == NULL)
+            return NULL;
+
+        H3Index out[PyLong_AsLong(num_items)];
+        H3_EXPORT(hexRing)(PyLong_AsLong(origin), PyLong_AsLong(k), out);
+
+        ring = PyList_New(PyLong_AsSsize_t(num_items));
+        for (idx = 0; idx < PyList_Size(ring); ++idx) {
+            item = PyLong_FromLong(*(out + (int)idx));
+            PyList_SET_ITEM(ring, idx, item);
+        }
+        return ring;
+    }
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+static PyObject *
+hexring(PyObject *m, PyObject *args, PyObject * kwds)
+{
+    PyObject *origin, *k;
+    if (!hexrange_parseargs(m, args, kwds, &origin, &k)) {
+        return NULL;
+    } else {
+        return hexring_impl(origin, k);
+    }
+}
+
+static int
+check_res(PyObject **res, const char *func, int pos)
+{
+    PyObject *ob = *res;
+    if (PyLong_Check(ob)) {
+        return 1;
+    }
+    PyErr_Format(PyExc_TypeError,
+        "%s expected type 'int' (pos %d) but recieved '%s'",
+        func, pos, Py_TYPE(ob)->tp_name);
+    return 0;
+}
+
+static PyObject *
+hexarea_impl(PyObject *res, PyObject *u)
+{
+    double area = -1;
+    PyObject *b;
+    const char *units;
+
+    if (!check_res(&res, "hex_area()", 1)) {
+        return NULL;
+    } else if (!PyUnicode_Check(u)) {
+        PyErr_Format(PyExc_TypeError,
+            "%s expected type 'str' (pos 2) but recieved '%s'",
+            "hex_area", Py_TYPE(u)->tp_name);
+        return NULL;
+    } else {
+        // Inputs okay
+        b = PyUnicode_AsASCIIString(u);
+        if (b == NULL)
+            return PyErr_Occurred();
+        units = PyBytes_AsString(b);
+        if (units == NULL)
+            return PyErr_Occurred();
+
+        if (strcmp(units, "km2") == 0)
+            area = H3_EXPORT(hexAreaKm2)(PyLong_AsLong(res));
+        else if (strcmp(units, "m2") == 0)
+            area = H3_EXPORT(hexAreaM2)(PyLong_AsLong(res));
+        else {
+            PyErr_Format(PyExc_ValueError,
+                "%s expected one of {'km2', 'm2'} (pos 2) but recieved '%s'",
+                "hex_area()", units);
+            Py_DECREF(b);
+            return NULL;
+        }
+        Py_DECREF(b);
+
+        if (area < 0) {
+            PyErr_Format(PyExc_RuntimeError,
+                "internal error: %s in hex_area() (line %d)", __FILE__, __LINE__);
+            return NULL;
+        } else {
+            return PyFloat_FromDouble(area);
+        }
+
+    }
+
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+static PyObject *
+hexarea(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"res", "units", NULL};
+    PyObject *u, *res;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO", kwlist, &res, &u)) {
+        return NULL;
+    } else {
+        return hexarea_impl(res, u);
+    }
+}
+
+static PyObject *
+edgelength_impl(PyObject *res, PyObject *u)
+{
+    PyObject *b;
+    const char *s;
+    double edge_len = -1;
+
+    if (!check_res(&res, "edge_length", 1)) {
+        return NULL; /* error string set in check_res */
+    } else if (!PyUnicode_Check(u)) {
+        PyErr_Format(PyExc_TypeError,
+            "h3py.edge_length(): expected type 'str' (pos 2) but recieved '%s'",
+            Py_TYPE(u)->tp_name);
+        return NULL;
+    } else { /* input types okay */
+        b = PyUnicode_AsASCIIString(u);
+        if (b == NULL)
+            return PyErr_Occurred();
+        s = PyBytes_AsString(b);
+        if (s == NULL)
+            return PyErr_Occured();
+        if (strcmp(s, "km") == 0) {
+            edge_len = H3_EXPORT(edgeLengthKm)(PyLong_AsLong(res));
+        } else if (strcmp(s, "m") == 0) {
+            edge_len = H3_EXPORT(edgeLengthM)(PyLong_AsLong(res));
+        } else {
+            PyErr_Format(PyExc_ValueError,
+                "expected one of {'km', 'm'} (pos 2) but recieved '%s'", s);
+            Py_DECREF(b);
+            return NULL;
+        }
+        Py_DECREF(b);
+        if (edge_len < 0) {
+            PyErr_Format(PyExc_RuntimeError,
+                "internal error: %s in edge_length() (line %d)", __FILE__, __LINE__);
+            return NULL;
+        } else {
+            return PyFloat_FromDouble(edge_len);
+        }
+    }
+    PyErr_BadInternalCall();
+    return NULL;
+}
+
+static PyObject *
+edgelength(PyObject *m, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"res", "units", NULL};
+
+    PyObject *u, *res;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO", kwlist, &res, &u)) {
+        return NULL;
+    } else {
+        return edgelength_impl(res, u);
+    }
 }

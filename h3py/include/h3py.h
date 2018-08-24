@@ -16,6 +16,35 @@ extern "C" {
 #endif
 
 
+typedef struct _geocoord {
+    PyObject_HEAD
+    GeoCoord ob_val;
+} geocoord_object;
+
+typedef struct _h3index {
+    PyObject_HEAD
+    H3Index ob_val;
+} h3index_object;
+
+typedef struct _geoboundary {
+    PyObject_HEAD
+    GeoBoundary ob_val;
+} geoboundary_object;
+
+static PyTypeObject geocoord_type;
+static PyTypeObject h3index_type;
+static PyTypeObject geoboundary_type;
+
+static h3index_object *geotoh3(geocoord_object *, PyLongObject *);
+static geocoord_object *h3togeo(h3index_object *);
+static geoboundary_object *h3togeoboundary(h3index_object *);
+static PyObject *maxkringsize(long);
+static PyObject *hexrange(h3index_object *, long);
+static PyObject *hexrangedistances(h3index_object *, long);
+static PyObject *hexranges(PyObject *, long);
+static PyObject *
+
+
 #define PyH3_PARSE_ERROR(funcname) \
     PyErr_SetString(PyExc_RuntimeError, \
         "Could not parse arguments for function '" funcname "'.")
